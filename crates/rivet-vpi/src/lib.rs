@@ -76,12 +76,6 @@ pub struct VpiBackend {
     str_buf: Vec<u8>,
 }
 
-fn parse_version(v: &str) -> (u32, u32, u32) {
-    let mut it =
-        v.trim().split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).map(|s| s.parse::<u32>().unwrap_or(0));
-    (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
-}
-
 impl VpiBackend {
     /// Query the simulator and build a backend with the right quirks.
     pub fn new() -> VpiBackend {
