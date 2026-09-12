@@ -122,7 +122,7 @@ pub fn generate(json: &str, top_type: Option<&str>) -> Result<String, String> {
          fn bind_signal(m: &Module, name: &str, width: u32) -> Result<Signal> {\n    \
              let s = m.signal(name)?;\n    \
              if width != 0 && s.width() != width {\n        \
-                 return Err(rivet::Error::Msg(format!(\"{}: expected width {width}, design has {}; regenerate bindings\", s.path(), s.width())));\n    \
+                 return Err(rivet::Error::Msg(format!(\n            \"{}: expected width {width}, design has {}; regenerate bindings\",\n            s.path(),\n            s.width()\n        )));\n    \
              }\n    \
              Ok(s)\n\
          }\n\n\

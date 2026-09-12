@@ -6,7 +6,11 @@ use rivet::{Bind, Module, Result, Signal};
 fn bind_signal(m: &Module, name: &str, width: u32) -> Result<Signal> {
     let s = m.signal(name)?;
     if width != 0 && s.width() != width {
-        return Err(rivet::Error::Msg(format!("{}: expected width {width}, design has {}; regenerate bindings", s.path(), s.width())));
+        return Err(rivet::Error::Msg(format!(
+            "{}: expected width {width}, design has {}; regenerate bindings",
+            s.path(),
+            s.width()
+        )));
     }
     Ok(s)
 }
