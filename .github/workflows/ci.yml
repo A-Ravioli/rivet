@@ -29,6 +29,10 @@ jobs:
         run: target/debug/rivet run --sim icarus -C examples/dff
       - name: dff example on Verilator
         run: target/debug/rivet run --sim verilator -C examples/dff
+      - name: fifo example (kit) on Icarus and Verilator
+        run: |
+          target/debug/rivet run --sim icarus -C examples/fifo
+          target/debug/rivet run --sim verilator -C examples/fifo
       - name: Benchmarks (smoke)
         env:
           RIVET_BENCH_N: "2000"

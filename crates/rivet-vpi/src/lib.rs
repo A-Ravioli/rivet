@@ -30,6 +30,7 @@ pub enum Sim {
     Vcs,
     Riviera,
     Dsim,
+    Ghdl,
     Other,
 }
 
@@ -110,6 +111,8 @@ impl VpiBackend {
             Sim::Riviera
         } else if pl.contains("dsim") {
             Sim::Dsim
+        } else if pl.contains("ghdl") {
+            Sim::Ghdl
         } else {
             Sim::Other
         };
@@ -120,8 +123,9 @@ impl VpiBackend {
         let deposit_flag = if sim == Sim::Verilator && !verilator_inertial { vpiNoDelay } else { vpiInertialDelay };
         let trusts_inertial = match std::env::var("RIVET_TRUST_INERTIAL_WRITES") {
             Ok(v) => v == "1",
-            // cocotb's defaults: trust Verilator (5.036+), not Icarus/Questa/Xcelium/VCS.
-            Err(_) => verilator_inertial,
+            // cocotb's defaults: trust Verilator (5.036+) and GHDL, not
+            // Icarus/Questa/Xcelium/VCS.
+            Err(_) => verilator_inertial || sim == Sim::Ghdl,
         };
         VpiBackend {
             sim,
@@ -315,6 +319,7 @@ impl Backend for VpiBackend {
             Sim::Vcs => "vcs",
             Sim::Riviera => "riviera",
             Sim::Dsim => "dsim",
+            Sim::Ghdl => "ghdl",
             Sim::Other => "vpi",
         }
     }

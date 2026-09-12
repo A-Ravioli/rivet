@@ -61,6 +61,9 @@ macro_rules! bail {
 /// Return early with a formatted error if the condition is false.
 #[macro_export]
 macro_rules! ensure {
+    ($cond:expr $(,)?) => {
+        if !$cond { return Err($crate::error::Error::Msg(format!("condition failed: {}", stringify!($cond)))) }
+    };
     ($cond:expr, $($arg:tt)*) => {
         if !$cond { return Err($crate::error::Error::Msg(format!($($arg)*))) }
     };

@@ -1,0 +1,12 @@
+[package]
+name = "example-dff-vhdl"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rivet = { workspace = true }
+log = { workspace = true }

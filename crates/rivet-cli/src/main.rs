@@ -33,7 +33,7 @@ fn usage() -> ! {
         "usage: rivet <run|build|clean> [options] [-- sim args]\n\
          \n\
          options:\n\
-         \x20 --sim <icarus|verilator>   simulator (default: icarus)\n\
+         \x20 --sim <icarus|verilator|ghdl>  simulator (default: icarus)\n\
          \x20 -p, --package <name>       test crate (default: crate in the current directory)\n\
          \x20 -C <dir>                   change to directory first\n\
          \x20 --release                  build the harness in release mode\n\
@@ -234,6 +234,32 @@ fn build_icarus(m: &Manifest, opts: &Opts, sim_dir: &Path) -> Result<PathBuf, St
     Ok(out)
 }
 
+/// Analyse and elaborate with GHDL (mcode backend: nothing to link, the
+/// design runs with `ghdl -r`).
+fn build_ghdl(m: &Manifest, opts: &Opts, sim_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(sim_dir).map_err(|e| e.to_string())?;
+    let cfg = m.sim("ghdl");
+    let sources = m.sources_abs();
+    let mut common: Vec<String> = vec![format!("--workdir={}", sim_dir.display())];
+    if !cfg.args.iter().any(|a| a.starts_with("--std")) {
+        common.push("--std=08".into());
+    }
+    common.extend(cfg.args.iter().cloned());
+    let hash = hash_inputs(&sources, &common)?;
+    let stamp = sim_dir.join("build.hash");
+    if std::fs::read_to_string(&stamp).ok().as_deref() == Some(&hash.to_string()) {
+        return Ok(());
+    }
+    let mut cmd = Command::new("ghdl");
+    cmd.arg("-a").args(&common).args(&sources);
+    run_cmd(cmd, opts.verbose)?;
+    let mut cmd = Command::new("ghdl");
+    cmd.arg("-e").args(&common).arg(&m.design.top);
+    run_cmd(cmd, opts.verbose)?;
+    std::fs::write(&stamp, hash.to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn cargo_build(pkg: &Package, opts: &Opts, verilator: bool) -> Result<(), String> {
     let mut cmd = Command::new("cargo");
     cmd.arg("build").arg("-p").arg(&pkg.name).current_dir(&pkg.manifest_dir);
@@ -317,6 +343,36 @@ fn run(opts: &Opts) -> Result<ExitCode, String> {
             cmd.stdin(Stdio::null());
             run_cmd(cmd, opts.verbose)?;
         }
+        "ghdl" => {
+            cargo_build(&pkg, opts, false)?;
+            build_ghdl(&m, opts, &sim_dir)?;
+            if build_only {
+                return Ok(ExitCode::SUCCESS);
+            }
+            let so = pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name));
+            let cfg = m.sim("ghdl");
+            let mut cmd = Command::new("ghdl");
+            cmd.arg("-r").arg(format!("--workdir={}", sim_dir.display()));
+            if !cfg.args.iter().any(|a| a.starts_with("--std")) {
+                cmd.arg("--std=08");
+            }
+            cmd.args(cfg.args.iter().filter(|a| a.starts_with("--std") || a.starts_with("-P")));
+            cmd.arg(&m.design.top).arg(format!("--vpi={}", so.display()));
+            for (k, v) in &m.design.params {
+                cmd.arg(format!("-g{k}={v}"));
+            }
+            if opts.waves {
+                cmd.arg(format!("--wave={}", sim_dir.join(format!("{}.ghw", m.design.top)).display()));
+            }
+            cmd.args(cfg.run_args.iter());
+            cmd.args(&opts.extra);
+            common_env(&mut cmd, opts, &m, &results);
+            cmd.stdin(Stdio::null());
+            let status = cmd.status().map_err(|e| format!("cannot run ghdl: {e}"))?;
+            if opts.verbose {
+                eprintln!("rivet: simulator exited with {status}");
+            }
+        }
         "verilator" => {
             cargo_build(&pkg, opts, true)?;
             if build_only {
@@ -336,7 +392,7 @@ fn run(opts: &Opts) -> Result<ExitCode, String> {
                 eprintln!("rivet: simulator exited with {status}");
             }
         }
-        other => return Err(format!("unsupported simulator {other:?} (icarus, verilator)")),
+        other => return Err(format!("unsupported simulator {other:?} (icarus, verilator, ghdl)")),
     }
 
     match results_summary(&results) {

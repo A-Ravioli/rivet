@@ -18,6 +18,7 @@
 //! ```
 
 pub use rivet_core::*;
+pub use rivet_kit as kit;
 pub use rivet_macros::test;
 
 #[cfg(feature = "verilator")]

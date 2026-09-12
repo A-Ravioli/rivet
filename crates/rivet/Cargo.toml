@@ -8,6 +8,7 @@ description = "Rust hardware verification harness replacing cocotb"
 [dependencies]
 rivet-core = { workspace = true }
 rivet-macros = { workspace = true }
+rivet-kit = { workspace = true }
 rivet-vpi = { workspace = true, optional = true }
 rivet-verilator = { workspace = true, optional = true }
 log = { workspace = true }

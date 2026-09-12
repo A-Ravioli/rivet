@@ -37,6 +37,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-dff-vhdl"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet",
+]
+
+[[package]]
+name = "example-fifo"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet",
+ "rivet-verilator",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -109,6 +126,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "rivet-core",
+ "rivet-kit",
  "rivet-macros",
  "rivet-verilator",
  "rivet-vpi",
@@ -128,6 +146,14 @@ version = "0.1.0"
 dependencies = [
  "inventory",
  "log",
+]
+
+[[package]]
+name = "rivet-kit"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet-core",
 ]
 
 [[package]]

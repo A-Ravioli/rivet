@@ -7,10 +7,13 @@ members = [
     "crates/rivet-vpi",
     "crates/rivet-verilator",
     "crates/rivet-manifest",
+    "crates/rivet-kit",
     "crates/rivet",
     "crates/rivet-cli",
     "examples/dff",
     "examples/bench",
+    "examples/fifo",
+    "examples/dff_vhdl",
 ]
 
 [workspace.package]
@@ -26,6 +29,7 @@ rivet-macros = { path = "crates/rivet-macros" }
 rivet-vpi = { path = "crates/rivet-vpi" }
 rivet-verilator = { path = "crates/rivet-verilator" }
 rivet-manifest = { path = "crates/rivet-manifest" }
+rivet-kit = { path = "crates/rivet-kit" }
 rivet = { path = "crates/rivet" }
 inventory = "0.3"
 log = { version = "0.4", features = ["std"] }
