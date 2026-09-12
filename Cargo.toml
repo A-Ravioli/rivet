@@ -15,6 +15,7 @@ members = [
     "examples/fifo",
     "examples/dff_vhdl",
     "examples/conformance",
+    "examples/bus",
 ]
 
 [workspace.package]

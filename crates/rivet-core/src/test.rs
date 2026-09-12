@@ -72,6 +72,14 @@ pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
             _ => return false,
         }
     }
+    // Exact selection used by `rivet run --jobs` to hand each shard its
+    // share of the tests.
+    if let Ok(sel) = std::env::var("RIVET_TEST_SELECT") {
+        if !sel.trim().is_empty() {
+            let full = format!("{}::{}", t.module, t.name);
+            return sel.split(',').map(str::trim).any(|s| s == full);
+        }
+    }
     match filter {
         Some(f) if !f.trim().is_empty() => f
             .split(',')
@@ -397,6 +405,29 @@ impl Bind for Module {
     }
 }
 
+/// The design below `root` as an indented tree, one object per line with
+/// its kind and width (`dut.hierarchy()` on generated bindings).
+pub fn format_hierarchy(root: Module) -> String {
+    fn walk(obj: crate::handle::Object, out: &mut String, depth: usize) {
+        use std::fmt::Write as _;
+        let info = obj.info();
+        let pad = "  ".repeat(depth);
+        if info.kind.is_hierarchy() {
+            let _ = writeln!(out, "{pad}{} ({:?})", info.name, info.kind);
+            let children = obj.as_module().ok().and_then(|m| m.children().ok()).unwrap_or_default();
+            for c in children {
+                walk(c, out, depth + 1);
+            }
+        } else {
+            let extra = if info.is_const { ", const" } else { "" };
+            let _ = writeln!(out, "{pad}{} : {:?}[{}]{extra}", info.name, info.kind, info.width);
+        }
+    }
+    let mut out = String::new();
+    walk(root.object(), &mut out, 0);
+    out
+}
+
 /// Walk the design and write it as JSON (for `rivet bindgen`).
 pub fn dump_hierarchy(root: Module, path: &std::path::Path) -> std::io::Result<()> {
     fn walk(obj: crate::handle::Object, out: &mut String, depth: usize) {
@@ -475,6 +506,22 @@ pub fn install_default_entry() {
             runtime::finish();
             return;
         }
+        if let Ok(path) = std::env::var("RIVET_LIST_TESTS") {
+            // `rivet run --jobs`: report the selected tests and stop.
+            let filter = std::env::var("RIVET_TEST_FILTER").ok();
+            let names: Vec<String> = all_tests()
+                .iter()
+                .filter(|t| selected(t, filter.as_deref()))
+                .map(|t| format!("{}::{}", t.module, t.name))
+                .collect();
+            match std::fs::write(&path, names.join("\n") + "\n") {
+                Ok(()) => log::info!("listed {} test(s) to {path}", names.len()),
+                Err(e) => log::error!("cannot write {path}: {e}"),
+            }
+            runtime::with(|rt| rt.exit_code = 0);
+            runtime::finish();
+            return;
+        }
         crate::task::spawn_named("regression", async move {
             let results = run_regression(module).await;
             finish_with(&results);
@@ -506,8 +553,10 @@ fn finish_with(results: &[TestResult]) {
         eprintln!("RIVET_COVERAGE percent={:.2}", crate::coverage::percent());
     }
     if let Ok(p) = std::env::var("RIVET_COVERAGE_FILE") {
-        if let Err(e) = crate::coverage::write_json(std::path::Path::new(&p)) {
-            log::error!("cannot write {p}: {e}");
+        if !crate::coverage::groups().is_empty() {
+            if let Err(e) = crate::coverage::write_json(std::path::Path::new(&p)) {
+                log::error!("cannot write {p}: {e}");
+            }
         }
     }
     runtime::with(|rt| rt.exit_code = if failed > 0 { 1 } else { 0 });

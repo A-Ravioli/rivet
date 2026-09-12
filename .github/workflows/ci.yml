@@ -43,6 +43,12 @@ jobs:
         run: |
           target/debug/rivet run --sim icarus -C examples/conformance
           target/debug/rivet run --sim verilator -C examples/conformance
+      - name: bus example (kit, coverage, goldens, param sets, sharding) on Icarus and Verilator
+        run: |
+          target/debug/rivet run --sim icarus -C examples/bus -j 3 --cov-threshold 99
+          target/debug/rivet run --sim verilator -C examples/bus
+          target/debug/rivet cov report -C examples/bus --sim icarus --threshold 100
+          cargo test -p example-bus -- --test-threads 2
       - name: Benchmarks (smoke)
         env:
           RIVET_BENCH_N: "2000"

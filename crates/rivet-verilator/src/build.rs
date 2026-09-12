@@ -24,6 +24,7 @@ pub struct Build {
     timing: bool,
     verilator: String,
     warnings_fatal: bool,
+    obj_subdir: Option<String>,
 }
 
 impl Build {
@@ -40,7 +41,15 @@ impl Build {
             timing: false,
             verilator: std::env::var("VERILATOR").unwrap_or_else(|_| "verilator".into()),
             warnings_fatal: false,
+            obj_subdir: None,
         }
+    }
+
+    /// Build under `OUT_DIR/obj_dir/<name>` so several parameterisations of
+    /// one design keep separate object directories.
+    pub fn obj_subdir(mut self, name: &str) -> Build {
+        self.obj_subdir = Some(name.to_string());
+        self
     }
 
     /// Configure from the `rivet.toml` next to the crate's `Cargo.toml`
@@ -49,16 +58,22 @@ impl Build {
         let dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
         let m = rivet_manifest::Manifest::find(&dir).unwrap_or_else(|e| panic!("{e}"));
         println!("cargo:rerun-if-changed={}", m.dir.join("rivet.toml").display());
+        // `rivet run` selects a parameter set per build; a change rebuilds.
+        println!("cargo:rerun-if-env-changed=RIVET_PARAM_SET");
+        let set = std::env::var("RIVET_PARAM_SET").ok().filter(|s| !s.is_empty());
         let sim = m.sim("verilator");
         let mut b = Build::new(&m.design.top).files(m.sources_abs());
+        if let Some(set) = &set {
+            b = b.obj_subdir(set);
+        }
         for i in m.includes_abs() {
             b = b.include_dir(i);
         }
         for (k, v) in &m.design.defines {
             b = b.define(k, v);
         }
-        for (k, v) in &m.design.params {
-            b = b.param(k, v);
+        for (k, v) in m.params_for(set.as_deref()) {
+            b = b.param(&k, &v);
         }
         if let Some(ts) = &m.design.timescale {
             b = b.arg("--timescale").arg(ts);
@@ -137,7 +152,10 @@ impl Build {
     /// failure, as build scripts do.
     pub fn build(self) {
         let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-        let obj_dir = out_dir.join("obj_dir");
+        let obj_dir = match &self.obj_subdir {
+            Some(sub) => out_dir.join("obj_dir").join(sub),
+            None => out_dir.join("obj_dir"),
+        };
         let prefix = format!("V{}", self.top);
         for f in &self.files {
             println!("cargo:rerun-if-changed={}", f.display());
@@ -155,6 +173,8 @@ impl Build {
         if std::fs::read_to_string(&stamp).ok().as_deref() != Some(version.as_str()) {
             let _ = std::fs::remove_dir_all(&obj_dir);
         }
+        // Verilator creates its --Mdir but not the parents.
+        std::fs::create_dir_all(&obj_dir).expect("create obj_dir");
 
         let mut cmd = Command::new(&self.verilator);
         cmd.args(["--cc", "--vpi", "--public-flat-rw", "--build", "-Mdir"])

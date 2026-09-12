@@ -8,7 +8,9 @@
 //! ```
 //!
 //! The golden directory is `RIVET_GOLDEN_DIR` (the CLI sets it to
-//! `<crate>/golden`). A missing golden file fails the test with the
+//! `<crate>/golden`); the file is `<module>_<test>[@<param set>]__<name>.trace`.
+//! Time stamps count from the trace's creation, so a test records the same
+//! trace whether it runs first, last, or in its own shard. A missing golden file fails the test with the
 //! command to create it; `RIVET_UPDATE_GOLDEN=1` rewrites goldens from the
 //! current run. On a mismatch the actual trace is written next to the
 //! golden as `<name>.actual` and the failure message shows the first
@@ -23,22 +25,25 @@ pub struct Trace {
     name: String,
     lines: Vec<String>,
     stamp: bool,
+    /// Time stamps are relative to this instant (the trace's creation), so
+    /// the same test records the same trace whatever ran before it.
+    t0: u64,
 }
 
 impl Trace {
     /// A trace whose lines are prefixed with the simulation time.
     pub fn new(name: &str) -> Trace {
-        Trace { name: name.into(), lines: Vec::new(), stamp: true }
+        Trace { name: name.into(), lines: Vec::new(), stamp: true, t0: runtime::now() }
     }
 
     /// A trace without time stamps (for order-only comparisons).
     pub fn unstamped(name: &str) -> Trace {
-        Trace { name: name.into(), lines: Vec::new(), stamp: false }
+        Trace { name: name.into(), lines: Vec::new(), stamp: false, t0: 0 }
     }
 
     pub fn record(&mut self, item: impl std::fmt::Display) {
         if self.stamp {
-            let t = format_time(runtime::now(), runtime::precision(), Unit::Ns);
+            let t = format_time(runtime::now().saturating_sub(self.t0), runtime::precision(), Unit::Ns);
             self.lines.push(format!("{t:>12} {item}"));
         } else {
             self.lines.push(item.to_string());
@@ -66,7 +71,9 @@ impl Trace {
             .filter(|d| !d.is_empty())
             .ok_or_else(|| Error::Msg("RIVET_GOLDEN_DIR is not set (rivet run sets it to <crate>/golden)".into()))?;
         let test = rivet_core::log::current_test().unwrap_or_else(|| "no_test".into()).replace("::", "_");
-        Ok(PathBuf::from(dir).join(format!("{test}__{}.trace", self.name)))
+        // Goldens are per parameter set: the design differs.
+        let set = rivet_core::test::param_set().map(|s| format!("@{s}")).unwrap_or_default();
+        Ok(PathBuf::from(dir).join(format!("{test}{set}__{}.trace", self.name)))
     }
 
     /// Compare with the golden file (or write it under `RIVET_UPDATE_GOLDEN=1`).
