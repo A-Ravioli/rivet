@@ -299,7 +299,7 @@ pub fn dump_hierarchy(root: Module, path: &std::path::Path) -> std::io::Result<(
         if info.kind.is_hierarchy() {
             let children = obj.as_module().ok().and_then(|m| m.children().ok()).unwrap_or_default();
             if !children.is_empty() {
-                let _ = write!(out, ", \"children\": [\n");
+                let _ = writeln!(out, ", \"children\": [");
                 for (i, c) in children.iter().enumerate() {
                     walk(*c, out, depth + 1);
                     if i + 1 < children.len() {
