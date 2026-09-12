@@ -38,7 +38,7 @@ The critical performance and correctness questions are all about (1) and (2):
   be hundreds of nanoseconds, which means the simulator's own evaluation becomes
   the bottleneck again, which is where it should be.
 - **How expensive is one value read or write?** cocotb goes through a binary
-  string on every access. VPI, VHPI, and FLI all have native packed-vector
+  string on every access, and its `vpiVectorVal` counterpart is used nowhere. VPI, VHPI, and FLI all have native packed-vector
   formats (`vpiVectorVal`, `vhpiLogicVecVal`, `mti_GetArrayValue`), so the
   string round trip is a design choice, not a constraint.
 - **Where in the timestep are you when you resume?** cocotb's five-phase timing
@@ -258,6 +258,9 @@ Types:
   `From<&str>` for `"8'b1010_xxzz"` literals, and `Display` in binary/hex.
 - `Bits<const N: usize>`: 2-state fixed width for the common case, converts
   losslessly to `LogicVec`.
+- Writes of `u64`, `u128`, and big integers go straight into the vector
+  encoding; there is no 32-bit cliff (cocotb's `set_signal_val_int` is
+  `int32_t` and everything wider becomes a formatted string).
 - Scalars: `i64`, `f64`, `String`, and enum variants (name plus ordinal).
 
 Reads use `vpiVectorVal` (VPI), `vhpiLogicVecVal` (VHPI), and
@@ -423,9 +426,11 @@ replaces cocotb's timestamp-based `always` check and the Makefile flow.
 Shipped with the harness, because cocotb's ecosystem shows what happens when
 the bus library is a separate, under-maintained project:
 
-- `Clock`: native, driven by the executor's timer wheel, not a task awaiting
-  `Timer` twice per period. Supports start/stop, phase offset, and, on
-  Verilator, waking edge waiters without a VPI callback.
+- `Clock`: native, driven by the executor's timer wheel. cocotb 2.x already
+  moved its clock into C++ (`GpiClock`) for the same reason; Rivet goes one
+  step further by letting the clock wake `RisingEdge` waiters directly, and on
+  Verilator without any VPI callback. Supports start/stop, phase offset, duty
+  cycle, `cycles(n)`.
 - `Reset` helper: assert for N cycles, active-high/low.
 - Sync: `Event`, `Queue<T>` (bounded/unbounded), `Lock`, `Semaphore`.
 - Combinators: `join!`, `first!`, `with_timeout`, `Scope`.
