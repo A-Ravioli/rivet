@@ -9,7 +9,7 @@ interpreter and string-typed values with an in-process native executor and
 `aval`/`bval` vectors. On Icarus the harness overhead per clock edge is about
 1.4 µs against roughly 25 µs for cocotb; see [`docs/benchmarks.md`](docs/benchmarks.md).
 
-Status: Icarus Verilog and Verilator work end to end; see
+Status: Icarus Verilog, Verilator, and GHDL (VHDL) work end to end; see
 [`docs/design/03-status.md`](docs/design/03-status.md). Design documents are in
 [`docs/design/`](docs/design/README.md).
 
@@ -44,6 +44,7 @@ binary that links the model. See [`examples/dff`](examples/dff) for the
 cargo build -p rivet-cli
 target/debug/rivet run --sim icarus    -C examples/dff
 target/debug/rivet run --sim verilator -C examples/dff
+target/debug/rivet run --sim ghdl      -C examples/dff_vhdl
 target/debug/rivet run --sim icarus -C examples/dff --filter counter --waves --log debug
 ```
 
@@ -60,10 +61,11 @@ loads the harness into the simulator, and reads back a cocotb-compatible
 | `rivet-vpi` | VPI backend (Icarus, Verilator's VPI, and the cocotb-catalogued quirks for others) |
 | `rivet-verilator` | Verilator build helper, C++ shim, simulation main loop |
 | `rivet-macros` | `#[rivet::test]` |
+| `rivet-kit` | `reset`, `Driver`/`Monitor`, valid/ready handshake, `Scoreboard` |
 | `rivet-manifest` | `rivet.toml` |
 | `rivet-cli` | the `rivet` command |
 | `rivet` | facade crate |
 
 ## Requirements
 
-Rust stable, and Icarus Verilog 11+ or Verilator 5.x with a C++17 compiler.
+Rust stable, and Icarus Verilog 11+, Verilator 5.x with a C++17 compiler, or GHDL 4.x.

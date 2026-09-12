@@ -71,6 +71,9 @@ pub struct VpiBackend {
     deposit_flag: i32,
     trusts_inertial: bool,
     vec_buf: Vec<s_vpi_vecval>,
+    /// GHDL's VPI has no vpiVectorVal; move values as binary strings.
+    string_values: bool,
+    str_buf: Vec<u8>,
 }
 
 fn parse_version(v: &str) -> (u32, u32, u32) {
@@ -137,6 +140,8 @@ impl VpiBackend {
             deposit_flag,
             trusts_inertial,
             vec_buf: Vec::new(),
+            string_values: sim == Sim::Ghdl,
+            str_buf: Vec::new(),
         }
     }
 
@@ -179,7 +184,7 @@ impl VpiBackend {
             vpiGenScopeArray | vpiModuleArray | vpiInterfaceArray => (ObjKind::GenArray, size.max(0) as u32, false),
             vpiPackage => (ObjKind::Package, 0, false),
             vpiStructVar | vpiStructNet => {
-                if unsafe { vpi_get(vpiPacked, raw) } == 1 {
+                if self.sim != Sim::Ghdl && unsafe { vpi_get(vpiPacked, raw) } == 1 {
                     (ObjKind::LogicVec, size.max(0) as u32, false)
                 } else {
                     (ObjKind::Struct, 0, false)
@@ -193,7 +198,7 @@ impl VpiBackend {
             vpiEnumVar => (ObjKind::Enum, size.max(0) as u32, false),
             vpiStringVar => (ObjKind::String, 0, false),
             vpiParameter | vpiConstant => {
-                let ct = unsafe { vpi_get(vpiConstType, raw) };
+                let ct = if self.sim == Sim::Ghdl { vpiUndefined } else { unsafe { vpi_get(vpiConstType, raw) } };
                 match ct {
                     vpiRealConst => (ObjKind::Real, 64, true),
                     vpiStringConst => (ObjKind::String, 0, true),
@@ -210,7 +215,8 @@ impl VpiBackend {
             }
             _ => (ObjKind::Unknown, size.max(0) as u32, false),
         };
-        let signed = unsafe { vpi_get(vpiSigned, raw) } == 1;
+        // GHDL prints a warning for properties it does not know.
+        let signed = self.sim != Sim::Ghdl && unsafe { vpi_get(vpiSigned, raw) } == 1;
         let range = if kind.is_logic_like() || kind == ObjKind::Array {
             unsafe {
                 let l = vpi_handle(vpiLeftRange, raw);
@@ -459,6 +465,11 @@ impl Backend for VpiBackend {
             return Ok(None);
         }
         let h = self.intern(raw, Some(&ppath), name);
+        if h == parent {
+            // GHDL answers a lookup of an unknown generic with the scope
+            // itself; report it as missing instead.
+            return Ok(None);
+        }
         self.entries[parent.0 as usize].children.get_or_insert_with(HashMap::new).insert(name.to_string(), h);
         Ok(Some(h))
     }
@@ -562,6 +573,13 @@ impl Backend for VpiBackend {
             *out = self.read_binstr(raw)?;
             return Ok(());
         }
+        if self.string_values {
+            *out = self.read_binstr(raw)?;
+            if out.width() != width && width > 0 {
+                out.resize(width);
+            }
+            return Ok(());
+        }
         let words = (width as usize).div_ceil(32);
         let mut v = s_vpi_value::new(vpiVectorVal);
         unsafe {
@@ -608,6 +626,14 @@ impl Backend for VpiBackend {
         };
         let cstring;
         let mut val = match v {
+            Value::Vec(x) if self.string_values => {
+                self.str_buf.clear();
+                self.str_buf.extend(x.to_binstr().bytes());
+                self.str_buf.push(0);
+                let mut val = s_vpi_value::new(vpiBinStrVal);
+                val.value.str_ = self.str_buf.as_mut_ptr() as *mut c_char;
+                val
+            }
             Value::Vec(x) => {
                 let words = (x.width() as usize).div_ceil(32);
                 self.vec_buf.clear();

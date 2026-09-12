@@ -8,9 +8,9 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 | M1 Verilator | done (VPI path) | `rivet-verilator`: build helper, generated shim, Rust main loop, native timer wheel and phase scheduling; VCD/FST tracing; direct signal access (M5) not started |
 | M2 Icarus / general VPI | done | `rivet-vpi`: `vpiVectorVal` values, persistent value-change callbacks, callback re-entrancy handled in the runtime, `vlog_startup_routines` export; other VPI simulators carry cocotb's quirks in code but are unverified |
 | M3 `cargo test` harness and CLI | partial | `rivet` CLI (`run`, `build`, `clean`, `--filter`, `--waves`, `--release`, `--seed`, `--log`), `rivet.toml`, `#[rivet::test]` with `timeout`/`skip`/`expect_fail`/`stage`, JUnit `results.xml`; not yet: a libtest-compatible `cargo test` harness, `--list`, JSON output |
-| M4 VHPI (GHDL, NVC) | not started | |
+| M4 VHDL | partial | VHDL designs run on GHDL through its VPI (`examples/dff_vhdl`, values as binary strings since GHDL has no `vpiVectorVal`); generics are not reachable by name on GHDL; a VHPI backend (NVC, Riviera, Xcelium VHDL, Questa) is not started |
 | M5 typed bindings, Verilator direct access | not started | |
-| M6 kit | partial | `Clock`, `Event`, `Queue`, `Lock`, `first`/`join`/`with_timeout`, `Scope`; no Driver/Monitor/Scoreboard or bus models yet |
+| M6 kit | partial | `Clock`, `Event`, `Queue`, `Lock`, `first`/`join`/`with_timeout`, `Scope`; `rivet-kit` has `reset`, `Driver`/`Monitor`, a valid/ready source and sink, and an in-order `Scoreboard` (`examples/fifo`); no AXI or memory models yet |
 | M7 commercial simulators | code only | Xcelium startup, Questa string-write, Verilator recurring-callback quirks are implemented but have never run on those tools |
 
 ## Verified end to end
@@ -21,6 +21,10 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
   concurrent tasks with a `Queue`.
 - `examples/bench`: 7 benchmarks on both; numbers in
   [`../benchmarks.md`](../benchmarks.md).
+- `examples/fifo`: 3 kit-based tests (valid/ready source from a queue, sink
+  with random backpressure, scoreboard) on Icarus and Verilator, with
+  identical simulated end times on both.
+- `examples/dff_vhdl`: 2 tests on GHDL 4.1.
 
 ## Behaviours pinned by tests against the mock
 

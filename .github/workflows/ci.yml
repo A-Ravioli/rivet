@@ -14,9 +14,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - name: Install simulators
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator ghdl
       - name: Versions
-        run: iverilog -V | head -1; verilator --version; cargo --version
+        run: iverilog -V | head -1; verilator --version; ghdl --version | head -1; cargo --version
       - name: Unit tests (mock simulator)
         run: cargo test --workspace
       - name: Format
@@ -29,6 +29,8 @@ jobs:
         run: target/debug/rivet run --sim icarus -C examples/dff
       - name: dff example on Verilator
         run: target/debug/rivet run --sim verilator -C examples/dff
+      - name: VHDL dff example on GHDL
+        run: target/debug/rivet run --sim ghdl -C examples/dff_vhdl
       - name: fifo example (kit) on Icarus and Verilator
         run: |
           target/debug/rivet run --sim icarus -C examples/fifo
