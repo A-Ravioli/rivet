@@ -100,3 +100,71 @@ impl Manifest {
         self.sim.get(name).cloned().unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_full_manifest() {
+        let dir = std::env::temp_dir().join(format!("rivet-manifest-{}", std::process::id()));
+        let sub = dir.join("a").join("b");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            dir.join("rivet.toml"),
+            r#"
+[design]
+top = "dff"
+sources = ["hdl/dff.sv", "hdl/other.sv"]
+includes = ["inc"]
+timescale = "1ns/1ps"
+language = "verilog"
+
+[design.defines]
+SIM = "1"
+
+[design.params]
+WIDTH = "8"
+
+[sim.icarus]
+args = ["-g2012"]
+run_args = ["+foo=1"]
+
+[sim.verilator]
+trace = true
+timing = true
+"#,
+        )
+        .unwrap();
+        // Found from a nested directory.
+        let m = Manifest::find(&sub).unwrap();
+        assert_eq!(m.design.top, "dff");
+        assert_eq!(m.dir, dir);
+        assert_eq!(m.sources_abs(), vec![dir.join("hdl/dff.sv"), dir.join("hdl/other.sv")]);
+        assert_eq!(m.includes_abs(), vec![dir.join("inc")]);
+        assert_eq!(m.design.defines["SIM"], "1");
+        assert_eq!(m.design.params["WIDTH"], "8");
+        assert_eq!(m.design.timescale.as_deref(), Some("1ns/1ps"));
+        assert_eq!(m.sim("icarus").args, vec!["-g2012"]);
+        assert_eq!(m.sim("icarus").run_args, vec!["+foo=1"]);
+        assert!(m.sim("verilator").trace && m.sim("verilator").timing);
+        assert!(!m.sim("ghdl").trace, "missing sim section gives defaults");
+        assert!(m.sim("ghdl").args.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn minimal_and_errors() {
+        let dir = std::env::temp_dir().join(format!("rivet-manifest-min-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("rivet.toml"), "[design]\ntop = \"t\"\n").unwrap();
+        let m = Manifest::load(&dir.join("rivet.toml")).unwrap();
+        assert!(m.design.sources.is_empty());
+        assert!(m.design.language.is_none());
+        std::fs::write(dir.join("rivet.toml"), "[design]\nsources = []\n").unwrap();
+        assert!(Manifest::load(&dir.join("rivet.toml")).is_err(), "top is required");
+        assert!(Manifest::load(&dir.join("missing.toml")).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(Manifest::find(std::path::Path::new("/nonexistent-rivet-dir")).is_err());
+    }
+}

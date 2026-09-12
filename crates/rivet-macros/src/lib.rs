@@ -114,3 +114,25 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     expanded.into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(s: &str) -> syn::Result<TestArgs> {
+        syn::parse2::<TestArgs>(s.parse().unwrap())
+    }
+
+    // `test` is this crate's own macro, so name the built-in explicitly.
+    #[core::prelude::v1::test]
+    fn attribute_forms() {
+        let a = parse("").unwrap();
+        assert!(a.timeout.is_none() && !a.skip && !a.expect_fail && a.stage == 0);
+        let a = parse("timeout = 10.us(), skip, expect_fail, stage = -2").unwrap();
+        assert!(a.timeout.is_some() && a.skip && a.expect_fail && a.stage == -2);
+        let a = parse("skip = false, expect_fail = true,").unwrap();
+        assert!(!a.skip && a.expect_fail);
+        assert!(parse("bogus = 1").is_err());
+        assert!(parse("stage = x").is_err());
+    }
+}

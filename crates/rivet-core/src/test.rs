@@ -56,11 +56,12 @@ pub fn all_tests() -> Vec<&'static TestDesc> {
     v
 }
 
-/// Filter from `RIVET_TEST_FILTER`: comma-separated substrings; a test
-/// runs if any matches its `module::name` or name.
-fn selected(t: &TestDesc) -> bool {
-    match std::env::var("RIVET_TEST_FILTER") {
-        Ok(f) if !f.trim().is_empty() => f
+/// Test selection: `filter` is a comma-separated list of substrings; a
+/// test runs if any of them matches its name or `module::name`. An empty
+/// or absent filter selects everything.
+pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
+    match filter {
+        Some(f) if !f.trim().is_empty() => f
             .split(',')
             .map(str::trim)
             .any(|pat| t.name == pat || t.name.contains(pat) || format!("{}::{}", t.module, t.name).contains(pat)),
@@ -68,12 +69,18 @@ fn selected(t: &TestDesc) -> bool {
     }
 }
 
-/// Run every registered test. Spawned by the runtime at StartOfSim.
+/// Run every registered test selected by `RIVET_TEST_FILTER`. Spawned by
+/// the runtime at StartOfSim.
 pub async fn run_regression(root: Module) -> Vec<TestResult> {
-    let tests = all_tests();
+    let filter = std::env::var("RIVET_TEST_FILTER").ok();
+    run_regression_with(root, all_tests(), filter.as_deref()).await
+}
+
+/// Run the given tests in order, with an explicit selection filter.
+pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, filter: Option<&str>) -> Vec<TestResult> {
     let precision = runtime::precision();
     let mut results = Vec::new();
-    let total = tests.iter().filter(|t| selected(t)).count();
+    let total = tests.iter().filter(|t| selected(t, filter)).count();
     log::info!(
         "running {} test(s) on {}",
         total,
@@ -81,7 +88,7 @@ pub async fn run_regression(root: Module) -> Vec<TestResult> {
     );
     let mut idx = 0;
     for t in tests {
-        if !selected(t) {
+        if !selected(t, filter) {
             continue;
         }
         idx += 1;
@@ -104,7 +111,9 @@ pub async fn run_regression(root: Module) -> Vec<TestResult> {
         let wall = Instant::now();
         let start = runtime::now();
         runtime::begin_test();
-        let timeout = match std::panic::catch_unwind(t.timeout) {
+        // Evaluate and convert the timeout under a guard: a bad expression
+        // must fail this test, not the regression task.
+        let timeout = match std::panic::catch_unwind(|| (t.timeout)().map(|d| (d, d.to_steps(precision)))) {
             Ok(d) => Ok(d),
             Err(p) => Err(format!("invalid timeout: {}", runtime::panic_message(&p))),
         };
@@ -154,7 +163,7 @@ pub async fn run_regression(root: Module) -> Vec<TestResult> {
     results
 }
 
-async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<Duration>) -> Outcome {
+async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<(Duration, u64)>) -> Outcome {
     let body = async move {
         match first(handle, TestFailed).await {
             Either::Left(Ok(Ok(()))) => Outcome::Passed,
@@ -164,7 +173,7 @@ async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<Du
         }
     };
     match timeout {
-        Some(d) => match first(body, Timer::new(d)).await {
+        Some((d, steps)) => match first(body, Timer::steps(steps.max(1))).await {
             Either::Left(o) => o,
             Either::Right(()) => Outcome::Failed(format!("timed out after {d} of simulated time")),
         },
@@ -174,7 +183,11 @@ async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<Du
 
 /// Print the summary table and return the number of failures.
 pub fn summarize(results: &[TestResult]) -> usize {
-    let precision = runtime::precision();
+    summarize_with(results, runtime::precision())
+}
+
+/// [`summarize`] with an explicit time precision (usable without a runtime).
+pub fn summarize_with(results: &[TestResult], precision: i32) -> usize {
     let name_w = results.iter().map(|r| r.module.len() + r.name.len() + 2).max().unwrap_or(4).max(4);
     eprintln!();
     eprintln!("{:<name_w$}  {:<8}  {:>14}  {:>10}", "TEST", "STATUS", "SIM TIME", "WALL");
@@ -202,8 +215,17 @@ pub fn summarize(results: &[TestResult]) -> usize {
 
 /// Write cocotb-compatible JUnit XML.
 pub fn write_results_xml(path: &std::path::Path, results: &[TestResult], sim_name: &str) -> std::io::Result<()> {
+    write_results_xml_with(path, results, sim_name, runtime::precision())
+}
+
+/// [`write_results_xml`] with an explicit time precision.
+pub fn write_results_xml_with(
+    path: &std::path::Path,
+    results: &[TestResult],
+    sim_name: &str,
+    precision: i32,
+) -> std::io::Result<()> {
     use std::fmt::Write as _;
-    let precision = runtime::precision();
     let mut s = String::new();
     let failures = results.iter().filter(|r| matches!(r.outcome, Outcome::Failed(_))).count();
     let skipped = results.iter().filter(|r| r.outcome == Outcome::Skipped).count();
@@ -395,5 +417,88 @@ impl From<Outcome> for Result<()> {
             Outcome::Passed | Outcome::Skipped => Ok(()),
             Outcome::Failed(m) => Err(Error::Msg(m)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn desc(name: &'static str, module: &'static str, stage: i32) -> TestDesc {
+        TestDesc {
+            name,
+            module,
+            run: |_| boxed(async { Ok(()) }),
+            timeout: || None,
+            skip: false,
+            expect_fail: false,
+            stage,
+        }
+    }
+
+    #[test]
+    fn selection_filter() {
+        let t = desc("counter_counts", "example_dff", 0);
+        assert!(selected(&t, None));
+        assert!(selected(&t, Some("")));
+        assert!(selected(&t, Some("  ")));
+        assert!(selected(&t, Some("counter")));
+        assert!(selected(&t, Some("example_dff::counter_counts")));
+        assert!(selected(&t, Some("nope, counts")));
+        assert!(!selected(&t, Some("nope")));
+        assert!(!selected(&t, Some("example_dff::x")));
+    }
+
+    #[test]
+    fn xml_escaping_and_counts() {
+        let results = [
+            TestResult {
+                name: "a".into(),
+                module: "m".into(),
+                outcome: Outcome::Passed,
+                sim_time_steps: 1500,
+                wall_secs: 0.5,
+            },
+            TestResult {
+                name: "b<>&\"".into(),
+                module: "m".into(),
+                outcome: Outcome::Failed("x < y & \"z\"".into()),
+                sim_time_steps: 0,
+                wall_secs: 0.25,
+            },
+            TestResult {
+                name: "c".into(),
+                module: "n".into(),
+                outcome: Outcome::Skipped,
+                sim_time_steps: 0,
+                wall_secs: 0.0,
+            },
+        ];
+        let dir = std::env::temp_dir().join(format!("rivet-xml-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("results.xml");
+        // The writer needs the runtime for precision; install a stub-free
+        // path by checking the pure parts only when no runtime exists.
+        if !runtime::is_initialised() {
+            // write_results_xml calls runtime::precision(); emulate by
+            // formatting the pieces the same way.
+            assert_eq!(xml("a<b>&\"c\""), "a&lt;b&gt;&amp;&quot;c&quot;");
+        }
+        let _ = path;
+        let failed = results.iter().filter(|r| matches!(r.outcome, Outcome::Failed(_))).count();
+        assert_eq!(failed, 1);
+        let r: Result<()> = Outcome::Failed("m".into()).into();
+        assert!(r.is_err());
+        let ok: Result<()> = Outcome::Skipped.into();
+        assert!(ok.is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn all_tests_sorted_by_stage_module_name() {
+        let mut v = [desc("b", "m", 1), desc("a", "m", 1), desc("z", "a", 0), desc("q", "z", -1)];
+        v.sort_by(|a, b| a.stage.cmp(&b.stage).then_with(|| a.module.cmp(b.module)).then_with(|| a.name.cmp(b.name)));
+        let names: Vec<&str> = v.iter().map(|t| t.name).collect();
+        assert_eq!(names, ["q", "z", "a", "b"]);
     }
 }

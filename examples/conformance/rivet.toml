@@ -1,0 +1,11 @@
+[design]
+top = "conformance"
+sources = ["hdl/conformance.sv"]
+
+[sim.icarus]
+args = ["-g2012"]
+run_args = ["+conf=1"]
+
+[sim.verilator]
+run_args = ["+conf=1"]
+timing = true

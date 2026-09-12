@@ -145,17 +145,23 @@ impl VpiBackend {
         self.sim
     }
 
-    fn intern(&mut self, raw: vpiHandle, parent_path: Option<&str>, fallback_name: &str) -> Handle {
+    /// Register a simulator handle under `path` (built by the caller, as
+    /// cocotb does: simulators do not agree on vpiFullName, Verilator for
+    /// one reports top-level ports under a `TOP` scope). `None` means a
+    /// root, whose path is its own full name.
+    fn intern(&mut self, raw: vpiHandle, path: Option<String>, fallback_name: &str) -> Handle {
         let vtype = unsafe { vpi_get(vpiType, raw) };
         let name = unsafe { cstr(vpi_get_str(vpiName, raw)) };
         let name = if name.is_empty() { fallback_name.to_string() } else { name };
-        let full = unsafe { cstr(vpi_get_str(vpiFullName, raw)) };
-        let path = if !full.is_empty() {
-            full
-        } else {
-            match parent_path {
-                Some(p) => format!("{p}.{name}"),
-                None => name.clone(),
+        let path = match path {
+            Some(p) => p,
+            None => {
+                let full = unsafe { cstr(vpi_get_str(vpiFullName, raw)) };
+                if full.is_empty() {
+                    name.clone()
+                } else {
+                    full
+                }
             }
         };
         if let Some(&h) = self.by_path.get(&path) {
@@ -240,6 +246,12 @@ impl VpiBackend {
 
     fn raw(&self, h: Handle) -> vpiHandle {
         self.entries[h.0 as usize].raw
+    }
+
+    /// Mark an object constant when the simulator knows it is a parameter
+    /// but its VPI type does not say so (Verilator).
+    pub fn mark_const(&mut self, h: Handle) {
+        self.entries[h.0 as usize].info.is_const = true;
     }
 
     fn check_error(&self, what: &str) -> Result<()> {
@@ -462,7 +474,7 @@ impl Backend for VpiBackend {
             }
             return Ok(None);
         }
-        let h = self.intern(raw, Some(&ppath), name);
+        let h = self.intern(raw, Some(format!("{ppath}.{name}")), name);
         if h == parent {
             // GHDL answers a lookup of an unknown generic with the scope
             // itself; report it as missing instead.
@@ -492,7 +504,7 @@ impl Backend for VpiBackend {
         if raw.is_null() {
             return Ok(None);
         }
-        let h = self.intern(raw, Some(&ppath), &key);
+        let h = self.intern(raw, Some(format!("{ppath}[{index}]")), &key);
         self.entries[parent.0 as usize].children.get_or_insert_with(HashMap::new).insert(key, h);
         Ok(Some(h))
     }
@@ -517,7 +529,7 @@ impl Backend for VpiBackend {
                     unsafe { vpi_free_object(raw) };
                     continue;
                 }
-                let h = self.intern(raw, Some(&ppath), &name);
+                let h = self.intern(raw, Some(format!("{ppath}.{name}")), &name);
                 if seen.insert(h) {
                     out.push(h);
                     self.entries[parent.0 as usize].children.get_or_insert_with(HashMap::new).insert(name, h);

@@ -17,8 +17,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator ghdl
       - name: Versions
         run: iverilog -V | head -1; verilator --version; ghdl --version | head -1; cargo --version
-      - name: Unit tests (mock simulator)
-        run: cargo test --workspace
+      - name: Unit, mock-simulator, and CLI end-to-end tests
+        run: cargo test --workspace --no-fail-fast
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -39,9 +39,46 @@ jobs:
         run: |
           target/debug/rivet run --sim icarus -C examples/fifo
           target/debug/rivet run --sim verilator -C examples/fifo
+      - name: conformance suite on Icarus and Verilator
+        run: |
+          target/debug/rivet run --sim icarus -C examples/conformance
+          target/debug/rivet run --sim verilator -C examples/conformance
       - name: Benchmarks (smoke)
         env:
           RIVET_BENCH_N: "2000"
         run: |
           target/debug/rivet run --sim icarus -C examples/bench
           target/debug/rivet run --sim verilator -C examples/bench
+
+  verilator-5036:
+    # Verilator 5.036 is the oldest version cocotb 2.x supports and renamed
+    # symbol-table accessors; the harness must work there too. Built from
+    # source and cached by version.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Verilator build
+        id: cache-verilator
+        uses: actions/cache@v4
+        with:
+          path: /opt/verilator-5.036
+          key: verilator-5.036-ubuntu-24.04-v1
+      - name: Build Verilator 5.036
+        if: steps.cache-verilator.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git help2man perl python3 make autoconf g++ flex bison ccache libfl2 libfl-dev zlib1g-dev
+          git clone --depth 1 --branch v5.036 https://github.com/verilator/verilator.git /tmp/verilator
+          cd /tmp/verilator && autoconf && ./configure --prefix=/opt/verilator-5.036 && make -j"$(nproc)" && sudo make install
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: Examples on Verilator 5.036
+        env:
+          VERILATOR: /opt/verilator-5.036/bin/verilator
+        run: |
+          export PATH=/opt/verilator-5.036/bin:$PATH
+          verilator --version
+          target/debug/rivet run --sim verilator -C examples/dff
+          target/debug/rivet run --sim verilator -C examples/fifo
+          target/debug/rivet run --sim verilator -C examples/conformance

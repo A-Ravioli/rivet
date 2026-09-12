@@ -190,4 +190,40 @@ mod tests {
     fn format() {
         assert_eq!(format_time(2_500, -12, Unit::Ns), "2.5ns");
     }
+
+    #[test]
+    fn units_and_display() {
+        assert_eq!(Unit::Step.exponent(), None);
+        assert_eq!(Unit::Fs.exponent(), Some(-15));
+        assert_eq!(Unit::Sec.suffix(), "s");
+        assert_eq!(format!("{}", 2.5.us()), "2.5us");
+        assert_eq!(format!("{}", 3.steps()), "3step");
+        assert_eq!(1.fs().to_steps(-15), 1);
+        assert_eq!(1.ms().to_steps(-9), 1_000_000);
+        assert_eq!(1.sec().to_steps(-12), 1_000_000_000_000);
+        assert_eq!(Duration::steps(9).to_steps(-3), 9);
+        assert_eq!(format_time(7, -9, Unit::Step), "7 steps");
+        assert_eq!(format_time(1_500_000, -12, Unit::Us), "1.5us");
+        assert_eq!(format_time(0, -12, Unit::Ns), "0ns");
+        assert_eq!(RoundMode::default(), RoundMode::Error);
+        assert_eq!(0.3.ns().to_steps_with(-9, RoundMode::Ceil), 1);
+        assert_eq!(0.3.ns().to_steps_with(-9, RoundMode::Floor), 0);
+        assert_eq!(0.3.ns().to_steps_with(-9, RoundMode::Round), 0);
+        // Precision coarser than the unit still converts.
+        assert_eq!(1000.ps().to_steps(-9), 1);
+        // Floating-point noise below 1e-6 relative is tolerated.
+        assert_eq!((0.1 + 0.2).ns().to_steps(-12), 300);
+    }
+
+    #[test]
+    #[should_panic]
+    fn negative_duration_panics() {
+        let _ = (-1).ns().to_steps(-9);
+    }
+
+    #[test]
+    #[should_panic]
+    fn fractional_steps_panic() {
+        let _ = 1.5.steps().to_steps(-9);
+    }
 }

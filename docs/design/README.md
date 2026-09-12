@@ -16,3 +16,6 @@ Read in order.
    open, against the roadmap.
 5. [`04-remaining-work.md`](04-remaining-work.md): the concrete plan for each
    remaining gap, what it costs, and what needs a licence.
+
+Test coverage and findings: [`../testing.md`](../testing.md). Benchmarks:
+[`../benchmarks.md`](../benchmarks.md).

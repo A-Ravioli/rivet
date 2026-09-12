@@ -51,3 +51,26 @@ impl Hasher for FxHasher {
 
 pub type FxBuildHasher = BuildHasherDefault<FxHasher>;
 pub type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::hash::BuildHasher;
+
+    #[test]
+    fn map_works_and_hashes_differ() {
+        let mut m: FxHashMap<u64, u32> = FxHashMap::default();
+        for i in 0..1000u64 {
+            m.insert(i, i as u32 * 2);
+        }
+        assert_eq!(m[&999], 1998);
+        assert_eq!(m.len(), 1000);
+        let bh = FxBuildHasher::default();
+        let h = |v: u64| bh.hash_one(v);
+        assert_ne!(h(1), h(2));
+        assert_eq!(h(7), h(7));
+        let mut s = FxHasher::default();
+        s.write(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_ne!(s.finish(), 0);
+    }
+}

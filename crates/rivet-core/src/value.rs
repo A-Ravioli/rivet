@@ -703,4 +703,122 @@ mod tests {
         assert!(x.has_x() && !x.has_z());
         assert_eq!(x.to_binstr().len(), 70);
     }
+
+    #[test]
+    fn slice_and_bits() {
+        let v = LogicVec::parse("12'hA5F").unwrap();
+        assert_eq!(v.slice(3, 0).to_u64().unwrap(), 0xf);
+        assert_eq!(v.slice(11, 8).to_u64().unwrap(), 0xa);
+        assert_eq!(v.slice(7, 4).to_hexstr(), "5");
+        let mut w = LogicVec::zeros(8);
+        w.set_bit(7, Logic::One);
+        w.set_bit(0, Logic::Z);
+        assert_eq!(w.to_binstr(), "1000000z");
+        assert!(w.has_z() && !w.has_x());
+        assert_eq!(w.to_u64_lossy(), 0x80);
+        assert_eq!(w.iter().filter(|b| *b == Logic::Zero).count(), 6);
+    }
+
+    #[test]
+    fn inline_heap_transitions() {
+        let mut v = LogicVec::from_u64(64, u64::MAX);
+        assert_eq!(v.aval().len(), 2);
+        v.resize(100);
+        assert_eq!(v.aval().len(), 4);
+        assert_eq!(v.to_u128().unwrap(), u64::MAX as u128, "resize keeps low bits and zero-fills");
+        v.set_bit(99, Logic::One);
+        v.resize(40);
+        assert_eq!(v.aval().len(), 2);
+        assert_eq!(v.to_u64().unwrap(), (1u64 << 40) - 1, "shrinking masks the top word");
+        let planes = LogicVec::from_planes(70, vec![1, 2, 3], vec![0, 0, 0]);
+        assert_eq!(planes.width(), 70);
+        assert_eq!(planes.aval(), &[1, 2, 3]);
+        assert_eq!(LogicVec::from_planes(70, vec![0, 0, u32::MAX], vec![0; 3]).aval()[2], (1 << 6) - 1);
+    }
+
+    #[test]
+    fn xz_states() {
+        let x = LogicVec::xs(4);
+        let z = LogicVec::zs(4);
+        assert_eq!(x.to_binstr(), "xxxx");
+        assert_eq!(z.to_binstr(), "zzzz");
+        assert!(x.to_u64().is_err() && z.to_u64().is_err());
+        assert_eq!(x.to_hexstr(), "x");
+        assert_eq!(LogicVec::from_binstr("zz01").unwrap().to_hexstr(), "z");
+        assert_eq!(LogicVec::from_binstr("UWLH-").unwrap().to_binstr(), "xx01x");
+        assert!(LogicVec::from_binstr("012").is_none());
+        assert!(LogicVec::parse("8'q1").is_none());
+        assert!(LogicVec::parse("x'b1").is_none());
+        assert_eq!(LogicVec::parse("4'hx").unwrap().to_binstr(), "xxxx");
+        assert_eq!(LogicVec::parse("3'b1_0_1").unwrap().to_u64().unwrap(), 5);
+        assert_eq!(LogicVec::parse("6'hff").unwrap().to_u64().unwrap(), 0x3f, "hex literal truncated to width");
+    }
+
+    #[test]
+    fn integer_conversions() {
+        assert_eq!(LogicVec::from_i64(4, -1).to_binstr(), "1111");
+        assert_eq!(LogicVec::from_i64(4, -1).to_i64().unwrap(), -1);
+        assert_eq!(LogicVec::from_i64(1, 1).to_i64().unwrap(), -1, "1-bit signed");
+        assert_eq!(LogicVec::from_i64(64, -5).to_i64().unwrap(), -5);
+        assert_eq!(LogicVec::from_i64(100, -5).to_u128().unwrap() & 0xffff, 0xfffb);
+        assert_eq!(LogicVec::from_u64(65, u64::MAX).to_u64().unwrap(), u64::MAX);
+        let big = LogicVec::from_u128(65, 1u128 << 64);
+        assert!(big.to_u64().is_err(), "does not fit 64 bits");
+        assert_eq!(big.to_u128().unwrap(), 1u128 << 64);
+        assert_eq!(LogicVec::zeros(0).to_u64().unwrap(), 0);
+        assert_eq!(LogicVec::zeros(0).to_binstr(), "");
+    }
+
+    #[test]
+    fn into_logic_vec_impls() {
+        assert_eq!(true.into_logic_vec(4).to_u64().unwrap(), 1);
+        assert_eq!(Logic::X.into_logic_vec(4).to_binstr(), "000x");
+        assert_eq!((-1i8).into_logic_vec(16).to_u64().unwrap(), 0xffff);
+        assert_eq!(0x1234u16.into_logic_vec(8).to_u64().unwrap(), 0x34);
+        assert_eq!("8'hAB".into_logic_vec(8).to_u64().unwrap(), 0xab);
+        assert_eq!("1010".into_logic_vec(8).to_u64().unwrap(), 0b1010);
+        let v = LogicVec::from_u64(8, 7);
+        assert_eq!((&v).into_logic_vec(4).to_u64().unwrap(), 7);
+        assert_eq!(v.clone().into_logic_vec(16).width(), 16);
+        assert_eq!(usize::MAX.into_logic_vec(3).to_u64().unwrap(), 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot parse")]
+    fn bad_literal_panics() {
+        let _ = "8'hzz zz".into_logic_vec(8);
+    }
+
+    #[test]
+    fn display_and_eq() {
+        let v = LogicVec::from_u64(12, 0xabc);
+        assert_eq!(format!("{v}"), "12'b101010111100");
+        assert_eq!(format!("{v:#}"), "12'habc");
+        assert_eq!(format!("{v:?}"), "12'b101010111100");
+        assert_eq!(format!("{v:x}"), "abc");
+        assert_eq!(format!("{v:b}"), "101010111100");
+        assert!(v == 0xabcu64);
+        assert!(v == 0xabci32);
+        assert!(LogicVec::from_i64(8, -2) == -2i32);
+        assert!(!(LogicVec::xs(8) == 0u64));
+        assert_eq!(Logic::from_char('L'), Some(Logic::Zero));
+        assert_eq!(Logic::from_char('q'), None);
+        assert_eq!(format!("{}", Logic::Z), "z");
+        assert_eq!(LogicVec::from(Logic::One).to_u64().unwrap(), 1);
+        assert_eq!(LogicVec::from(false).width(), 1);
+        let u = LogicVec::xs(2).to_u64().unwrap_err();
+        assert!(u.to_string().contains("X or Z"));
+    }
+
+    #[test]
+    fn hash_and_eq_ignore_storage_kind() {
+        use std::collections::HashSet;
+        let mut a = LogicVec::from_u64(100, 5);
+        a.resize(8);
+        let b = LogicVec::from_u64(8, 5);
+        assert_eq!(a, b);
+        let mut set = HashSet::new();
+        set.insert(a);
+        assert!(set.contains(&b));
+    }
 }

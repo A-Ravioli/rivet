@@ -59,8 +59,8 @@ pub mod prelude {
         first, join, next_time_step, read_only, read_write, with_timeout, yield_now, Either, Timer,
     };
     pub use crate::{
-        bail, ensure, spawn, spawn_named, Clock, Event, JoinHandle, Lock, Logic, LogicVec, Module, Queue, Scope,
-        Signal, TimeExt,
+        bail, ensure, spawn, spawn_named, Clock, Event, IntoLogicVec, JoinHandle, Lock, Logic, LogicVec, Module, Queue,
+        Scope, Signal, TimeExt,
     };
     pub use log::{debug, error, info, trace, warn};
 }

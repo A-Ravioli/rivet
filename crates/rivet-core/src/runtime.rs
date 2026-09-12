@@ -562,6 +562,13 @@ impl Runtime {
         if self.phase == Phase::EndTimeStep {
             panic!("writing to a signal in the ReadOnly phase is not allowed");
         }
+        let info = self.backend.info(h);
+        if info.is_const {
+            return Err(crate::backend::BackendError::Sim(format!(
+                "{} is a constant and cannot be written",
+                info.path
+            )));
+        }
         let write_now =
             action != Action::Deposit || self.caps.trusts_inertial_writes || self.phase == Phase::ValuesSettle;
         if write_now {
@@ -653,4 +660,19 @@ pub fn set_root(h: Handle) {
 /// Number of live tasks.
 pub fn live_tasks() -> usize {
     with(|rt| rt.exec.live_count())
+}
+
+/// Number of tasks waiting on an edge of `h` (for tests).
+pub fn debug_edge_waiters(h: Handle) -> usize {
+    with(|rt| rt.edges.get(&h).map(|r| r.waiters.len()).unwrap_or(0))
+}
+
+/// Number of armed timers (for tests).
+pub fn debug_pending_timers() -> usize {
+    with(|rt| rt.timers.len())
+}
+
+/// Number of buffered deposits (for tests).
+pub fn debug_pending_writes() -> usize {
+    with(|rt| rt.writes.len())
 }

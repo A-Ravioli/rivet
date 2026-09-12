@@ -161,6 +161,16 @@ impl VerilatorBackend {
         (VerilatorBackend { vpi, sched: sched.clone(), direct: HashMap::default(), use_direct }, sched)
     }
 
+    /// Verilator's VPI types parameters like variables; its symbol table
+    /// knows better. Mark them constant so writes are rejected up front.
+    fn note_param(&mut self, h: Handle) {
+        if let Some(d) = self.direct(h) {
+            if d.is_param {
+                self.vpi.mark_const(h);
+            }
+        }
+    }
+
     /// Resolve (and cache) the model storage behind a handle.
     fn direct(&mut self, h: Handle) -> Option<Direct> {
         if !self.use_direct {
@@ -175,30 +185,34 @@ impl VerilatorBackend {
                 Some((s, n)) => (s.to_string(), n.to_string()),
                 None => (String::new(), info.path.clone()),
             };
-            let cscope = CString::new(scope).ok();
-            let cname = CString::new(name).ok();
-            match (cscope, cname) {
-                (Some(cs), Some(cn)) => {
-                    let mut datap: *mut c_void = std::ptr::null_mut();
-                    let (mut vltype, mut width, mut is_param) = (0 as c_int, 0 as c_int, 0 as c_int);
-                    let ok = unsafe {
-                        rivet_vl_var_find(cs.as_ptr(), cn.as_ptr(), &mut datap, &mut vltype, &mut width, &mut is_param)
-                    };
-                    if ok == 1
-                        && !datap.is_null()
-                        && matches!(
-                            vltype,
-                            VLVT_UINT8 | VLVT_UINT16 | VLVT_UINT32 | VLVT_UINT64 | VLVT_WDATA | VLVT_REAL
-                        )
-                        && (vltype == VLVT_REAL || width as u32 == info.width)
-                    {
-                        Some(Direct { ptr: datap, vltype, width: width as u32, is_param: is_param != 0 })
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
+            // A top-level port exists twice in the model: the real storage
+            // under Verilator's `TOP` scope and a per-module alias that the
+            // model refreshes from it on every evaluation. Writes must land
+            // on the former, so try `TOP` first for root-level names.
+            let root_level = !scope.contains('.');
+            let mut scopes = Vec::with_capacity(2);
+            if root_level {
+                scopes.push("TOP".to_string());
             }
+            scopes.push(scope);
+            let mut found = None;
+            for sc in scopes {
+                let (Some(cs), Some(cn)) = (CString::new(sc).ok(), CString::new(name.clone()).ok()) else { continue };
+                let mut datap: *mut c_void = std::ptr::null_mut();
+                let (mut vltype, mut width, mut is_param) = (0 as c_int, 0 as c_int, 0 as c_int);
+                let ok = unsafe {
+                    rivet_vl_var_find(cs.as_ptr(), cn.as_ptr(), &mut datap, &mut vltype, &mut width, &mut is_param)
+                };
+                if ok == 1
+                    && !datap.is_null()
+                    && matches!(vltype, VLVT_UINT8 | VLVT_UINT16 | VLVT_UINT32 | VLVT_UINT64 | VLVT_WDATA | VLVT_REAL)
+                    && (vltype == VLVT_REAL || width as u32 == info.width)
+                {
+                    found = Some(Direct { ptr: datap, vltype, width: width as u32, is_param: is_param != 0 });
+                    break;
+                }
+            }
+            found
         } else {
             None
         };
@@ -227,13 +241,25 @@ impl Backend for VerilatorBackend {
         self.vpi.root(name)
     }
     fn child_by_name(&mut self, parent: Handle, name: &str) -> Result<Option<Handle>> {
-        self.vpi.child_by_name(parent, name)
+        let h = self.vpi.child_by_name(parent, name)?;
+        if let Some(h) = h {
+            self.note_param(h);
+        }
+        Ok(h)
     }
     fn child_by_index(&mut self, parent: Handle, index: i64) -> Result<Option<Handle>> {
-        self.vpi.child_by_index(parent, index)
+        let h = self.vpi.child_by_index(parent, index)?;
+        if let Some(h) = h {
+            self.note_param(h);
+        }
+        Ok(h)
     }
     fn children(&mut self, parent: Handle) -> Result<Vec<Handle>> {
-        self.vpi.children(parent)
+        let hs = self.vpi.children(parent)?;
+        for h in &hs {
+            self.note_param(*h);
+        }
+        Ok(hs)
     }
     fn info(&self, h: Handle) -> &ObjInfo {
         self.vpi.info(h)

@@ -186,7 +186,7 @@ fn run_cmd(mut cmd: Command, verbose: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn hash_inputs(paths: &[PathBuf], extra: &[String]) -> Result<u64, String> {
+pub fn hash_inputs(paths: &[PathBuf], extra: &[String]) -> Result<u64, String> {
     let mut h = DefaultHasher::new();
     for p in paths {
         let data = std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
@@ -297,7 +297,8 @@ fn cargo_build(pkg: &Package, opts: &Opts, verilator: bool) -> Result<(), String
     run_cmd(cmd, opts.verbose)
 }
 
-fn results_summary(path: &Path) -> Option<(usize, usize, usize)> {
+/// `(tests, failures, skipped)` from a results.xml.
+pub fn results_summary(path: &Path) -> Option<(usize, usize, usize)> {
     let xml = std::fs::read_to_string(path).ok()?;
     let mut tests = 0;
     let mut failures = 0;
@@ -466,6 +467,31 @@ pub fn main_with_args(args: impl IntoIterator<Item = String>) -> ExitCode {
     }
 }
 
+/// libtest-style selection: positional filters are substrings of
+/// `module::name` (or exact matches with `--exact`); `--skip` patterns
+/// exclude.
+pub fn select_tests<'a>(
+    tests: &'a [(String, String)],
+    filters: &[String],
+    skips: &[String],
+    exact: bool,
+) -> Vec<&'a (String, String)> {
+    tests
+        .iter()
+        .filter(|(module, name)| {
+            let full = format!("{module}::{name}");
+            let m = if filters.is_empty() {
+                true
+            } else if exact {
+                filters.iter().any(|f| *f == full || *f == *name)
+            } else {
+                filters.iter().any(|f| full.contains(f.as_str()))
+            };
+            m && !skips.iter().any(|s| full.contains(s.as_str()))
+        })
+        .collect()
+}
+
 /// Entry point for `cargo test` on a Rivet test crate: a libtest-compatible
 /// `main` for a `[[test]]` target with `harness = false`.
 ///
@@ -504,20 +530,7 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
             s => filters.push(s.to_string()),
         }
     }
-    let selected: Vec<&(String, String)> = tests
-        .iter()
-        .filter(|(module, name)| {
-            let full = format!("{module}::{name}");
-            let m = if filters.is_empty() {
-                true
-            } else if exact {
-                filters.iter().any(|f| *f == full || *f == *name)
-            } else {
-                filters.iter().any(|f| full.contains(f.as_str()))
-            };
-            m && !skips.iter().any(|s| full.contains(s.as_str()))
-        })
-        .collect();
+    let selected = select_tests(&tests, &filters, &skips, exact);
     if list {
         for (module, name) in &selected {
             println!("{module}::{name}: test");
@@ -568,5 +581,93 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
             eprintln!("rivet: error: {e}");
             ExitCode::from(101)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(m: &str, n: &str) -> (String, String) {
+        (m.into(), n.into())
+    }
+
+    #[test]
+    fn selection() {
+        let tests = vec![t("m", "alpha"), t("m", "beta"), t("n", "alpha_two")];
+        let none: Vec<String> = vec![];
+        assert_eq!(select_tests(&tests, &none, &none, false).len(), 3);
+        let f = vec!["alpha".to_string()];
+        assert_eq!(select_tests(&tests, &f, &none, false).len(), 2);
+        assert_eq!(select_tests(&tests, &f, &none, true).len(), 1, "--exact matches the bare name");
+        let f2 = vec!["m::alpha".to_string()];
+        assert_eq!(select_tests(&tests, &f2, &none, true).len(), 1);
+        let skip = vec!["two".to_string()];
+        assert_eq!(select_tests(&tests, &f, &skip, false).len(), 1);
+    }
+
+    #[test]
+    fn results_xml_summary() {
+        let dir = std::env::temp_dir().join(format!("rivet-cli-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("results.xml");
+        std::fs::write(
+            &p,
+            r#"<testsuites>
+  <testsuite name="a" tests="3" failures="1" errors="0" skipped="1">
+  </testsuite>
+  <testsuite name="b" tests="2" failures="0" errors="1" skipped="0">
+  </testsuite>
+</testsuites>"#,
+        )
+        .unwrap();
+        assert_eq!(results_summary(&p), Some((5, 2, 1)));
+        assert_eq!(results_summary(&dir.join("missing.xml")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn input_hash_changes_with_content_and_args() {
+        let dir = std::env::temp_dir().join(format!("rivet-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.sv");
+        std::fs::write(&f, "module a; endmodule").unwrap();
+        let h1 = hash_inputs(std::slice::from_ref(&f), &["-g2012".into()]).unwrap();
+        let h2 = hash_inputs(std::slice::from_ref(&f), &["-g2005".into()]).unwrap();
+        std::fs::write(&f, "module a; wire x; endmodule").unwrap();
+        let h3 = hash_inputs(std::slice::from_ref(&f), &["-g2012".into()]).unwrap();
+        assert_ne!(h1, h2);
+        assert_ne!(h1, h3);
+        assert!(hash_inputs(&[dir.join("missing.sv")], &[]).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn arg_parsing() {
+        let o = parse_args(
+            [
+                "run",
+                "--sim",
+                "verilator",
+                "-C",
+                "/tmp/x",
+                "--release",
+                "--filter",
+                "a,b",
+                "--waves",
+                "-p",
+                "pkg",
+                "--",
+                "+foo",
+            ]
+            .map(String::from),
+        );
+        assert_eq!(o.cmd, "run");
+        assert_eq!(o.sim, "verilator");
+        assert_eq!(o.dir, PathBuf::from("/tmp/x"));
+        assert!(o.release && o.waves);
+        assert_eq!(o.filter.as_deref(), Some("a,b"));
+        assert_eq!(o.package.as_deref(), Some("pkg"));
+        assert_eq!(o.extra, vec!["+foo"]);
     }
 }

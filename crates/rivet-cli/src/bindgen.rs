@@ -144,3 +144,58 @@ pub fn generate(json: &str, top_type: Option<&str>) -> Result<String, String> {
     let _ = writeln!(g.out, "impl Bind for {ty} {{\n    fn bind(root: Module) -> Result<Self> {{\n        Self::from_module(root)\n    }}\n}}");
     Ok(g.out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const JSON: &str = r#"{"name": "top", "path": "top", "kind": "Module", "width": 0, "is_const": false, "signed": false, "type": "module", "children": [
+  {"name": "clk", "path": "top.clk", "kind": "Logic", "width": 1, "is_const": false, "signed": false, "type": "net"},
+  {"name": "type", "path": "top.type", "kind": "LogicVec", "width": 8, "is_const": false, "signed": true, "type": "reg"},
+  {"name": "1bad", "path": "top.1bad", "kind": "Real", "width": 64, "is_const": false, "signed": false, "type": "real"},
+  {"name": "mem", "path": "top.mem", "kind": "Array", "width": 4, "is_const": false, "signed": false, "type": "reg array", "element": {"kind": "LogicVec", "width": 8}, "range": [3, 0]},
+  {"name": "WIDTH", "path": "top.WIDTH", "kind": "LogicVec", "width": 32, "is_const": true, "signed": false, "type": "parameter"},
+  {"name": "u_sub", "path": "top.u_sub", "kind": "Module", "width": 0, "is_const": false, "signed": false, "type": "module", "children": [
+    {"name": "x", "path": "top.u_sub.x", "kind": "Integer", "width": 32, "is_const": false, "signed": true, "type": "integer"}
+  ]},
+  {"name": "gen", "path": "top.gen", "kind": "GenArray", "width": 0, "is_const": false, "signed": false, "type": "generate array"},
+  {"name": "gen[0]", "path": "top.gen[0]", "kind": "Module", "width": 0, "is_const": false, "signed": false, "type": "module", "children": [
+    {"name": "gi", "path": "top.gen[0].gi", "kind": "LogicVec", "width": 32, "is_const": true, "signed": false, "type": "parameter"},
+    {"name": "tap", "path": "top.gen[0].tap", "kind": "LogicVec", "width": 8, "is_const": false, "signed": false, "type": "reg"}
+  ]},
+  {"name": "weird", "path": "top.weird", "kind": "Unknown", "width": 0, "is_const": false, "signed": false, "type": "?"}
+]}"#;
+
+    #[test]
+    fn generates_valid_rust() {
+        let code = generate(JSON, None).unwrap();
+        syn::parse_file(&code).expect("generated code parses as Rust");
+        assert!(code.contains("pub struct Top {"));
+        assert!(code.contains("pub clk: Signal,"));
+        assert!(code.contains("pub type_: Signal,"), "keyword field gets a trailing underscore");
+        assert!(code.contains("pub _1bad: Signal,"), "leading digit gets a prefix");
+        assert!(code.contains("pub mem: Vec<Signal>,"));
+        assert!(code.contains("bind_array(&module, \"mem\", 0, 3)"));
+        assert!(code.contains("pub WIDTH: Signal,"));
+        assert!(code.contains("bind_signal(&module, \"WIDTH\", 32)"));
+        assert!(code.contains("pub struct Top_u_sub {"));
+        assert!(code.contains("pub u_sub: Top_u_sub,"));
+        assert!(code.contains("pub gen: Module,"), "generate arrays are indexed at run time");
+        assert!(code.contains("pub struct Top_gen_0_ {"));
+        assert!(code.contains("pub tap: Signal,"));
+        assert!(!code.contains("\"gi\""), "genvar inside a generate element is skipped");
+        assert!(!code.contains("weird"), "unknown kinds are skipped");
+        assert!(code.contains("pub type Dut = Top;"));
+        assert!(code.contains("impl Bind for Top"));
+    }
+
+    #[test]
+    fn custom_top_type_and_bad_json() {
+        let code = generate(JSON, Some("Top")).unwrap();
+        assert!(!code.contains("pub type Top = Top;"));
+        assert!(generate("{not json", None).is_err());
+        assert_eq!(field_name("a-b c"), "a_b_c");
+        assert_eq!(field_name("self"), "self_");
+        assert_eq!(type_name(&["dff".into(), "u_x".into()]), "Dff_u_x");
+    }
+}

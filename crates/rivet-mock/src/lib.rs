@@ -54,12 +54,19 @@ pub struct Design {
     events: BTreeMap<u64, Vec<EventBody>>,
     precision: i32,
     root: Handle,
+    trust_inertial: bool,
 }
 
 impl Design {
     pub fn new(top: &str) -> Design {
-        let mut d =
-            Design { nodes: Vec::new(), procs: Vec::new(), events: BTreeMap::new(), precision: -12, root: Handle(0) };
+        let mut d = Design {
+            nodes: Vec::new(),
+            procs: Vec::new(),
+            events: BTreeMap::new(),
+            precision: -12,
+            root: Handle(0),
+            trust_inertial: false,
+        };
         d.root = d.add_node(None, top, ObjKind::Module, 0);
         d
     }
@@ -67,6 +74,13 @@ impl Design {
     /// Time precision exponent (default `-12`, picoseconds).
     pub fn precision(mut self, exp: i32) -> Design {
         self.precision = exp;
+        self
+    }
+
+    /// Report `trusts_inertial_writes` to the runtime (default `false`,
+    /// so deposits are buffered until ReadWrite as on Icarus).
+    pub fn trust_inertial(mut self, v: bool) -> Design {
+        self.trust_inertial = v;
         self
     }
 
@@ -227,6 +241,26 @@ impl ProcCtx<'_> {
     pub fn now(&self) -> u64 {
         self.k.now
     }
+
+    /// End the simulation from the HDL side (like `$finish`).
+    pub fn finish(&mut self) {
+        self.k.finished = true;
+    }
+}
+
+thread_local! {
+    static KERNEL: RefCell<Option<std::rc::Weak<RefCell<Kernel>>>> = const { RefCell::new(None) };
+}
+
+/// Simulator-side counters for tests: `(pending timers, registered value
+/// callbacks, stats)`.
+pub fn kernel_stats() -> (usize, usize, Stats) {
+    KERNEL.with(|k| {
+        let k = k.borrow();
+        let rc = k.as_ref().and_then(|w| w.upgrade()).expect("mock kernel not installed");
+        let k = rc.borrow();
+        (k.timed_index.len(), k.value_cbs.values().map(|v| v.len()).sum(), k.stats.clone())
+    })
 }
 
 struct Kernel {
@@ -235,6 +269,7 @@ struct Kernel {
     events: BTreeMap<u64, Vec<EventBody>>,
     precision: i32,
     root: Handle,
+    trust_inertial: bool,
     now: u64,
     /// Signals whose value changed since callbacks were last fired.
     dirty: HashSet<Handle>,
@@ -271,6 +306,7 @@ impl Kernel {
             events: d.events,
             precision: d.precision,
             root: d.root,
+            trust_inertial: d.trust_inertial,
             now: 0,
             dirty: HashSet::new(),
             delta_changed: HashSet::new(),
@@ -334,7 +370,10 @@ impl Kernel {
     fn apply_inertial(&mut self) {
         let puts = std::mem::take(&mut self.inertial);
         for (h, v) in puts {
-            self.commit(h, v);
+            // A forced signal ignores deposits until released, as in Verilog.
+            if self.nodes[h.0 as usize].forced.is_none() {
+                self.commit(h, v);
+            }
         }
     }
 
@@ -379,6 +418,7 @@ impl MockBackend {
     /// driver.
     pub fn install(self) -> MockSim {
         let sim = MockSim { k: self.k.clone() };
+        KERNEL.with(|k| *k.borrow_mut() = Some(Rc::downgrade(&self.k)));
         runtime::init(Box::new(self));
         sim
     }
@@ -393,7 +433,7 @@ impl Backend for MockBackend {
     }
     fn caps(&self) -> Capabilities {
         Capabilities {
-            trusts_inertial_writes: std::env::var("RIVET_TRUST_INERTIAL_WRITES").map(|v| v == "1").unwrap_or(false),
+            trusts_inertial_writes: self.k.borrow().trust_inertial,
             remove_fired_callbacks: false,
             four_state: true,
             supports_force: true,
@@ -644,6 +684,35 @@ impl MockSim {
     pub fn value(&self, h: Handle) -> LogicVec {
         self.k.borrow().nodes[h.0 as usize].value.clone()
     }
+}
+
+/// Run a set of registered tests through the real regression loop on a
+/// design. Returns the per-test results. Used to test the runner itself.
+pub fn run_regression(
+    design: Design,
+    tests: Vec<&'static rivet_core::TestDesc>,
+    filter: Option<&str>,
+) -> Vec<rivet_core::test::TestResult> {
+    rivet_core::log::init();
+    let mut sim = design.into_backend().install();
+    let out: Rc<RefCell<Vec<rivet_core::test::TestResult>>> = Rc::new(RefCell::new(Vec::new()));
+    let slot = out.clone();
+    let filter = filter.map(str::to_string);
+    runtime::set_entry(move || {
+        let root = runtime::backend(|b| b.root(None)).expect("root");
+        runtime::set_root(root);
+        rivet_core::spawn_named("regression", async move {
+            let r =
+                rivet_core::test::run_regression_with(rivet_core::Module::from_handle(root), tests, filter.as_deref())
+                    .await;
+            *slot.borrow_mut() = r;
+            runtime::finish();
+        });
+    });
+    sim.run();
+    runtime::shutdown();
+    let v = out.borrow().clone();
+    v
 }
 
 /// Run one async test body against a design, with the runtime installed

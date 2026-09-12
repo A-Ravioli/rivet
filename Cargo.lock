@@ -28,6 +28,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-conformance"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet",
+ "rivet-verilator",
+]
+
+[[package]]
 name = "example-dff"
 version = "0.1.0"
 dependencies = [
@@ -139,6 +148,7 @@ version = "0.1.0"
 dependencies = [
  "rivet-manifest",
  "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -180,6 +190,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "rivet-core",
+ "serde_json",
 ]
 
 [[package]]

@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 rivet-core = { workspace = true }
 log = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1"

@@ -26,6 +26,10 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
   with random backpressure, scoreboard) on Icarus and Verilator, with
   identical simulated end times on both.
 - `examples/dff_vhdl`: 2 tests on GHDL 4.1.
+- `examples/conformance`: 21 tests per simulator on Icarus, Verilator 5.020,
+  and Verilator 5.036, covering every backend feature; see
+  [`../testing.md`](../testing.md) for the coverage map and the defects the
+  suite found.
 
 ## Behaviours pinned by tests against the mock
 
