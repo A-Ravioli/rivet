@@ -160,7 +160,17 @@ pub fn shutdown() -> Option<Box<dyn Backend>> {
 }
 
 pub fn is_initialised() -> bool {
-    RT.with(|cell| cell.borrow().is_some())
+    RT.with(|cell| cell.try_borrow().map(|c| c.is_some()).unwrap_or(true))
+}
+
+/// `(now, precision)` if the runtime exists and is not currently borrowed;
+/// safe to call from a logger.
+pub fn try_time() -> Option<(u64, i32)> {
+    RT.with(|cell| {
+        let slot = cell.try_borrow_mut().ok()?;
+        let rt = slot.as_ref()?;
+        Some((rt.backend.now(), rt.backend.precision()))
+    })
 }
 
 /// Borrow the runtime briefly. Panics if the runtime is missing or already

@@ -149,6 +149,9 @@ impl Build {
             .arg(&obj_dir)
             .args(["--top-module", &self.top, "--prefix", &prefix])
             .args(["-CFLAGS", "-fPIC -std=gnu++17"]);
+        // Verilator's default OPT_FAST is -Os; match Cargo's profile instead.
+        let opt = if std::env::var("PROFILE").map(|p| p == "release").unwrap_or(false) { "-O2" } else { "-O1" };
+        cmd.arg("-CFLAGS").arg(opt);
         if !self.warnings_fatal {
             cmd.arg("-Wno-fatal");
         }

@@ -20,6 +20,54 @@ fn bind_array(m: &Module, name: &str, lo: i64, hi: i64) -> Result<Vec<Signal>> {
     (lo..=hi).map(|i| a.index(i)).collect()
 }
 
+/// `dff.gen[0]`
+#[derive(Clone)]
+pub struct Dff_gen_0_ {
+    pub module: Module,
+    /// `tap`: LogicVec reg, 8 bit(s)
+    pub tap: Signal,
+    /// `gi`: LogicVec parameter, 2 bit(s)
+    pub gi: Signal,
+}
+
+impl Dff_gen_0_ {
+    pub fn from_module(module: Module) -> Result<Self> {
+        Ok(Self { tap: bind_signal(&module, "tap", 8)?, gi: bind_signal(&module, "gi", 2)?, module })
+    }
+}
+
+/// `dff.gen[1]`
+#[derive(Clone)]
+pub struct Dff_gen_1_ {
+    pub module: Module,
+    /// `tap`: LogicVec reg, 8 bit(s)
+    pub tap: Signal,
+    /// `gi`: LogicVec parameter, 2 bit(s)
+    pub gi: Signal,
+}
+
+impl Dff_gen_1_ {
+    pub fn from_module(module: Module) -> Result<Self> {
+        Ok(Self { tap: bind_signal(&module, "tap", 8)?, gi: bind_signal(&module, "gi", 2)?, module })
+    }
+}
+
+/// `dff.gen[2]`
+#[derive(Clone)]
+pub struct Dff_gen_2_ {
+    pub module: Module,
+    /// `tap`: LogicVec reg, 8 bit(s)
+    pub tap: Signal,
+    /// `gi`: LogicVec parameter, 3 bit(s)
+    pub gi: Signal,
+}
+
+impl Dff_gen_2_ {
+    pub fn from_module(module: Module) -> Result<Self> {
+        Ok(Self { tap: bind_signal(&module, "tap", 8)?, gi: bind_signal(&module, "gi", 3)?, module })
+    }
+}
+
 /// `dff`
 #[derive(Clone)]
 pub struct Dff {
@@ -46,6 +94,12 @@ pub struct Dff {
     pub ratio: Signal,
     /// `WIDTH`: LogicVec parameter, 32 bit(s)
     pub WIDTH: Signal,
+    /// `gen[0]`
+    pub gen_0_: Dff_gen_0_,
+    /// `gen[1]`
+    pub gen_1_: Dff_gen_1_,
+    /// `gen[2]`
+    pub gen_2_: Dff_gen_2_,
 }
 
 impl Dff {
@@ -62,6 +116,9 @@ impl Dff {
             cycles: bind_signal(&module, "cycles", 32)?,
             ratio: bind_signal(&module, "ratio", 64)?,
             WIDTH: bind_signal(&module, "WIDTH", 32)?,
+            gen_0_: Dff_gen_0_::from_module(module.module("gen[0]")?)?,
+            gen_1_: Dff_gen_1_::from_module(module.module("gen[1]")?)?,
+            gen_2_: Dff_gen_2_::from_module(module.module("gen[2]")?)?,
             module,
         })
     }

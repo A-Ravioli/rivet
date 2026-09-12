@@ -15,8 +15,8 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 
 ## Verified end to end
 
-- `examples/dff`: 9 tests on Icarus Verilog 12.0 and Verilator 5.020, covering
-  generated typed bindings,
+- `examples/dff`: 10 tests on Icarus Verilog 12.0 and Verilator 5.020, covering
+  generated typed bindings, generate blocks,
   edges, ReadWrite/ReadOnly, deposits, X before reset, parameters, hierarchy
   enumeration, unpacked arrays, `integer`, `real`, timeouts, `expect_fail`,
   concurrent tasks with a `Queue`.
@@ -45,7 +45,8 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 - Force/Release are reported unsupported on Verilator (`Capabilities`).
 - `Signal::index` and `member` work for unpacked arrays and struct members
   the simulator exposes through `vpi_handle_by_index`/`by_name`; generate
-  arrays use cocotb's pseudo-region fallback but have no test yet.
+  arrays use cocotb's pseudo-region fallback (`dut.path_signal("gen[1].tap")`,
+  `dut.module("gen")?.index(1)`), tested on Icarus and Verilator.
 - The test crate must be linked into the Verilator binary
   (`use example_dff as _;` in `main.rs`) for `inventory` registrations to be
   present.

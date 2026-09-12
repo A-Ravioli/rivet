@@ -178,9 +178,8 @@ impl VpiBackend {
     fn classify(&self, raw: vpiHandle, vtype: i32, name: String, path: String) -> ObjInfo {
         let size = unsafe { vpi_get(vpiSize, raw) };
         let (kind, width, is_const) = match vtype {
-            vpiModule | vpiInterface | vpiProgram | vpiGenScope | vpiInternalScope | vpiPort => {
-                (ObjKind::Module, 0, false)
-            }
+            vpiModule | vpiInterface | vpiProgram | vpiGenScope | vpiInternalScope | vpiPort | vpiScope | vpiBegin
+            | vpiNamedBegin => (ObjKind::Module, 0, false),
             vpiGenScopeArray | vpiModuleArray | vpiInterfaceArray => (ObjKind::GenArray, size.max(0) as u32, false),
             vpiPackage => (ObjKind::Package, 0, false),
             vpiStructVar | vpiStructNet => {
@@ -213,7 +212,10 @@ impl VpiBackend {
                     (ObjKind::LogicVec, size.max(0) as u32, false)
                 }
             }
-            _ => (ObjKind::Unknown, size.max(0) as u32, false),
+            _ => {
+                log::debug!("unknown VPI object type {vtype} for {path}");
+                (ObjKind::Unknown, size.max(0) as u32, false)
+            }
         };
         // GHDL prints a warning for properties it does not know.
         let signed = self.sim != Sim::Ghdl && unsafe { vpi_get(vpiSigned, raw) } == 1;

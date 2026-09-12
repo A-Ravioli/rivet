@@ -203,3 +203,24 @@ async fn typed_dut(dut: Dut) -> rivet::Result<()> {
     info!("typed dut for {} ok", dut.module.path());
     Ok(())
 }
+
+#[rivet::test]
+async fn generate_blocks(dut: Module) -> rivet::Result<()> {
+    let clk = dut.signal("clk")?;
+    let d = dut.signal("d")?;
+    let _clock = Clock::start(clk, 10.ns());
+    d.set(0x40);
+    clk.rising_edge().await;
+    clk.rising_edge().await;
+    read_only().await;
+    // Path syntax with an index, and explicit generate-array indexing.
+    assert_eq!(dut.path_signal("gen[1].tap")?.get_u64()?, 0x41);
+    let gen = dut.module("gen")?;
+    for i in 0..3 {
+        let tap = gen.index(i)?.as_module()?.signal("tap")?;
+        assert_eq!(tap.get_u64()?, 0x40 + i as u64, "gen[{i}].tap");
+        assert_eq!(tap.width(), 8);
+    }
+    ensure!(gen.index(3).is_err(), "gen[3] must not exist");
+    Ok(())
+}

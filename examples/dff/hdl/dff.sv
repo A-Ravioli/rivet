@@ -34,4 +34,13 @@ module dff #(parameter int WIDTH = 8) (
         cycles <= cycles + 1;
         ratio  <= ratio + 0.5;
     end
+
+    // Generate loop: each block has a register holding its index plus d.
+    genvar gi;
+    generate
+        for (gi = 0; gi < 3; gi = gi + 1) begin : gen
+            logic [WIDTH-1:0] tap;
+            always_ff @(posedge clk) tap <= d + gi;
+        end
+    endgenerate
 endmodule

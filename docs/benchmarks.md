@@ -43,20 +43,23 @@ does not have, so there is no cocotb baseline here yet.
 
 | Test | Rivet |
 |---|---|
-| `timer_only` (one `Timer` per cycle, no clock) | 0.46 µs |
-| `clock_only` (clock task running, nothing awaiting it) | 1.36 µs |
-| `edge_roundtrip` | 2.01 µs |
-| `edge_roundtrip_immediate_clock` (clock with `NoDelay` writes, no ReadWrite flush) | 1.61 µs |
-| `edge_then_readonly` | 3.17 µs |
-| `value_traffic` | 2.69 µs |
-| `many_tasks` (100 tasks, per cycle) | 23.7 µs |
+| `timer_only` (one `Timer` per cycle, no clock) | 0.39 µs |
+| `clock_only` (clock task running, nothing awaiting it) | 1.19 µs |
+| `edge_roundtrip` | 1.67 µs |
+| `edge_roundtrip_immediate_clock` (clock with `NoDelay` writes, no ReadWrite flush) | 1.79 µs |
+| `edge_then_readonly` | 2.26 µs |
+| `value_traffic` | 2.65 µs |
+| `many_tasks` (100 tasks, per cycle) | 20.6 µs |
+
+The model is compiled with `-O2` in release builds (Verilator's default is
+`-Os`), which is worth 10 to 18% by itself.
 
 Each simulator event delivered to the harness (a timer, a value change, a
-phase callback) currently costs about 0.4 to 0.5 µs on Verilator, including
-the model evaluation that follows it. The Verilator backend already schedules
+phase callback) currently costs about 0.4 µs on Verilator, including the
+model evaluation that follows it. The Verilator backend already schedules
 timers and phase callbacks natively (`rivet-verilator/src/sched.rs`) instead
 of through VPI registrations, which took `edge_roundtrip` from 2.7 µs to
-2.0 µs. Remaining known costs, in likely order: two `eval_step` calls per
+2.0 µs before the `-O2` change. Remaining known costs, in likely order: two `eval_step` calls per
 half period (one after the timer, one after the ReadWrite flush), the
 per-event `HashMap` and `Box` traffic in the runtime, and the `Arc`-based
 wakers. Direct signal access without VPI (roadmap M5) is the next big step.

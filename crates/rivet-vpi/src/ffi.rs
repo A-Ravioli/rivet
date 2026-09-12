@@ -13,6 +13,8 @@ pub type PLI_UINT32 = c_uint;
 pub type PLI_BYTE8 = c_char;
 
 // Object types
+pub const vpiBegin: i32 = 4;
+pub const vpiNamedBegin: i32 = 33;
 pub const vpiConstant: i32 = 7;
 pub const vpiIntegerVar: i32 = 25;
 pub const vpiMemory: i32 = 29;

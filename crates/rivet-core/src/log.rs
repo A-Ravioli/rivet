@@ -18,14 +18,10 @@ impl Log for SimLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let time = if runtime::is_initialised() {
-            // Avoid re-entering a borrowed runtime (logging from inside `with`).
-            match std::panic::catch_unwind(|| runtime::with(|rt| (rt.backend.now(), rt.backend.precision()))) {
-                Ok((now, prec)) => format_time(now, prec, self.unit),
-                Err(_) => "?".to_string(),
-            }
-        } else {
-            "-".to_string()
+        // Logging from inside a runtime borrow must not re-enter it.
+        let time = match runtime::try_time() {
+            Some((now, prec)) => format_time(now, prec, self.unit),
+            None => "-".to_string(),
         };
         let level = match record.level() {
             Level::Error => "ERROR",
