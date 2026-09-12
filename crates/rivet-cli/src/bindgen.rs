@@ -52,6 +52,10 @@ impl Gen {
         if !self.emitted.insert(ty.clone()) {
             return ty;
         }
+        // Inside a generate block element, constants are genvars and
+        // localparams that not every simulator exposes; leave them out so the
+        // bindings stay portable.
+        let in_generate = path.last().map(|s| s.ends_with(']')).unwrap_or(false);
         let children = node.get("children").and_then(Value::as_array).cloned().unwrap_or_default();
         let mut fields = Vec::new();
         let mut binds = Vec::new();
@@ -88,6 +92,7 @@ impl Gen {
                     binds.push(format!("            {f}: bind_array(&module, {name:?}, {lo}, {hi})?,"));
                 }
                 "Unknown" => {}
+                _ if in_generate && c["is_const"].as_bool().unwrap_or(false) => {}
                 _ => {
                     let width = c["width"].as_u64().unwrap_or(0);
                     let ty_note = c["type"].as_str().unwrap_or("");

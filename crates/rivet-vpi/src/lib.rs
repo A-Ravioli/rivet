@@ -53,7 +53,7 @@ struct CbRec {
 thread_local! {
     /// Callback records live outside the backend so the C callback can find
     /// them without borrowing the runtime.
-    static CALLBACKS: RefCell<HashMap<u64, Box<CbRec>>> = RefCell::new(HashMap::new());
+    static CALLBACKS: RefCell<rivet_core::fxhash::FxHashMap<u64, Box<CbRec>>> = RefCell::new(Default::default());
     static NEXT_CB: RefCell<u64> = const { RefCell::new(1) };
     static SIM: RefCell<Sim> = const { RefCell::new(Sim::Other) };
 }

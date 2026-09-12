@@ -7,6 +7,7 @@ pub mod backend;
 pub mod clock;
 pub mod error;
 pub mod executor;
+pub mod fxhash;
 pub mod handle;
 pub mod log;
 pub mod runtime;

@@ -26,13 +26,11 @@ pub struct Dff_gen_0_ {
     pub module: Module,
     /// `tap`: LogicVec reg, 8 bit(s)
     pub tap: Signal,
-    /// `gi`: LogicVec parameter, 2 bit(s)
-    pub gi: Signal,
 }
 
 impl Dff_gen_0_ {
     pub fn from_module(module: Module) -> Result<Self> {
-        Ok(Self { tap: bind_signal(&module, "tap", 8)?, gi: bind_signal(&module, "gi", 2)?, module })
+        Ok(Self { tap: bind_signal(&module, "tap", 8)?, module })
     }
 }
 
@@ -42,13 +40,11 @@ pub struct Dff_gen_1_ {
     pub module: Module,
     /// `tap`: LogicVec reg, 8 bit(s)
     pub tap: Signal,
-    /// `gi`: LogicVec parameter, 2 bit(s)
-    pub gi: Signal,
 }
 
 impl Dff_gen_1_ {
     pub fn from_module(module: Module) -> Result<Self> {
-        Ok(Self { tap: bind_signal(&module, "tap", 8)?, gi: bind_signal(&module, "gi", 2)?, module })
+        Ok(Self { tap: bind_signal(&module, "tap", 8)?, module })
     }
 }
 
@@ -58,13 +54,11 @@ pub struct Dff_gen_2_ {
     pub module: Module,
     /// `tap`: LogicVec reg, 8 bit(s)
     pub tap: Signal,
-    /// `gi`: LogicVec parameter, 3 bit(s)
-    pub gi: Signal,
 }
 
 impl Dff_gen_2_ {
     pub fn from_module(module: Module) -> Result<Self> {
-        Ok(Self { tap: bind_signal(&module, "tap", 8)?, gi: bind_signal(&module, "gi", 3)?, module })
+        Ok(Self { tap: bind_signal(&module, "tap", 8)?, module })
     }
 }
 

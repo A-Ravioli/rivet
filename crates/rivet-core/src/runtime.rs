@@ -8,9 +8,10 @@
 
 use crate::backend::{Action, Backend, Capabilities, CbId, CbKind, Handle, OwnedValue, Value};
 use crate::executor::{Executor, TaskKey};
+use crate::fxhash::FxHashMap as HashMap;
 use crate::value::{Logic, LogicVec};
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
@@ -94,7 +95,8 @@ pub struct Runtime {
     ro: PhaseWaiters,
     nts: PhaseWaiters,
     writes: Vec<PendingWrite>,
-    write_index: HashMap<Handle, usize>,
+    /// Spare buffer swapped in at flush time to avoid reallocating.
+    writes_spare: Vec<PendingWrite>,
     pub(crate) root: Option<Handle>,
     pub(crate) current_test: Option<CurrentTest>,
     pub(crate) sim_ended: bool,
@@ -125,14 +127,14 @@ pub fn init(backend: Box<dyn Backend>) {
         exec: Executor::new(),
         caps,
         phase: Phase::Startup,
-        timers: HashMap::new(),
-        edges: HashMap::new(),
+        timers: HashMap::default(),
+        edges: HashMap::default(),
         next_waiter_id: 1,
         rw: PhaseWaiters::default(),
         ro: PhaseWaiters::default(),
         nts: PhaseWaiters::default(),
         writes: Vec::new(),
-        write_index: HashMap::new(),
+        writes_spare: Vec::new(),
         root: None,
         current_test: None,
         sim_ended: false,
@@ -239,10 +241,7 @@ pub fn cancel_all_other_tasks() {
 
 /// Drop any buffered deposits (between tests).
 pub fn discard_pending_writes() {
-    with(|rt| {
-        rt.writes.clear();
-        rt.write_index.clear();
-    });
+    with(|rt| rt.writes.clear());
 }
 
 /// Poll ready tasks until none is runnable.
@@ -366,16 +365,16 @@ fn handle_event(ev: Event) {
         }
         Event::ReadWrite => {
             with(|rt| rt.phase = Phase::ValuesSettle);
-            let (writes, wakers) = with(|rt| {
+            let (mut writes, wakers) = with(|rt| {
                 rt.rw.cb = None;
                 rt.rw.gen += 1;
-                let writes = std::mem::take(&mut rt.writes);
-                rt.write_index.clear();
+                let spare = std::mem::take(&mut rt.writes_spare);
+                let writes = std::mem::replace(&mut rt.writes, spare);
                 (writes, std::mem::take(&mut rt.rw.waiters))
             });
             // Apply buffered deposits before waking anyone, so writes made
             // earlier in the timestep are visible in the ReadWrite phase.
-            for w in writes {
+            for w in writes.drain(..) {
                 let r = with(|rt| {
                     let v = owned_as_value(&w.value);
                     rt.backend.write(w.handle, v, Action::Deposit)
@@ -384,6 +383,7 @@ fn handle_event(ev: Event) {
                     log::error!("scheduled write failed: {e}");
                 }
             }
+            with(|rt| rt.writes_spare = writes);
             for w in wakers {
                 w.wake();
             }
@@ -559,15 +559,10 @@ impl Runtime {
         if write_now {
             return self.backend.write(h, owned_as_value(&value), action);
         }
-        match self.write_index.get(&h) {
-            Some(&i) => {
-                // Latest write to a handle wins, but keep first-write order.
-                self.writes[i].value = value;
-            }
-            None => {
-                self.write_index.insert(h, self.writes.len());
-                self.writes.push(PendingWrite { handle: h, value });
-            }
+        // Latest write to a handle wins, but keep first-write order.
+        match self.writes.iter_mut().find(|w| w.handle == h) {
+            Some(w) => w.value = value,
+            None => self.writes.push(PendingWrite { handle: h, value }),
         }
         if self.rw.cb.is_none() {
             self.rw.cb = Some(

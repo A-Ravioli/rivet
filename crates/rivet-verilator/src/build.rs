@@ -277,6 +277,20 @@ int rivet_vl_vpi_call_value_cbs() {{ return VerilatedVpi::callValueCbs() ? 1 : 0
 void rivet_vl_vpi_call_timed_cbs() {{ VerilatedVpi::callTimedCbs(); }}
 uint64_t rivet_vl_vpi_next_deadline() {{ return VerilatedVpi::cbNextDeadline(); }}
 int rivet_vl_trace_supported() {{ return VM_TRACE; }}
+// Direct access to a public variable's storage (what --public-flat-rw
+// registers for VPI). Returns 1 if found and packed-only (no unpacked dims).
+int rivet_vl_var_find(const char* scope, const char* name, void** datap, int* vltype, int* width, int* is_param) {{
+    const VerilatedScope* sp = Verilated::threadContextp()->scopeFind(scope);
+    if (!sp) return 0;
+    VerilatedVar* vp = sp->varFind(name);
+    if (!vp) return 0;
+    if (vp->udims() != 0) return 0;
+    *datap = vp->datap();
+    *vltype = static_cast<int>(vp->vltype());
+    *width = vp->dims() == 0 ? 1 : vp->packed().elements();
+    *is_param = vp->isParam() ? 1 : 0;
+    return 1;
+}}
 void* rivet_vl_trace_open(void* p, const char* file) {{
 #if VM_TRACE
     Verilated::traceEverOn(true);

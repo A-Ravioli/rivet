@@ -20,15 +20,15 @@ RIVET_BENCH_N=100000 python3 examples/bench/cocotb/run.py icarus
 
 | Test | What it measures | cocotb 2.1 | Rivet | Ratio |
 |---|---|---|---|---|
-| `edge_roundtrip` | one task, `await RisingEdge(clk)` per cycle, harness-driven clock | 26.6 µs | 2.77 µs | 9.6× |
-| `edge_then_readonly` | edge, write `din`, `await ReadOnly()`, read `dout` | 42.0 µs | 4.38 µs | 9.6× |
-| `value_traffic` | edge, write 32-bit, read 32-bit and 512-bit | 305 µs | 7.30 µs | 42× |
-| `many_tasks` | 100 tasks each awaiting every edge (per cycle) | 311 µs | 23.2 µs | 13× |
+| `edge_roundtrip` | one task, `await RisingEdge(clk)` per cycle, harness-driven clock | 26.6 µs | 2.50 µs | 10.6× |
+| `edge_then_readonly` | edge, write `din`, `await ReadOnly()`, read `dout` | 42.0 µs | 3.96 µs | 10.6× |
+| `value_traffic` | edge, write 32-bit, read 32-bit and 512-bit | 305 µs | 7.68 µs | 40× |
+| `many_tasks` | 100 tasks each awaiting every edge (per cycle) | 311 µs | 20.8 µs | 15× |
 
 The bare simulator, running the same design from a pure-Verilog testbench
 with an `always #5 clk` and no harness at all, takes 1.36 µs per cycle
 (`vvp` on a 100 000-cycle `floor_tb`). So the harness overhead on
-`edge_roundtrip` is about 1.4 µs for Rivet versus about 25 µs for cocotb.
+`edge_roundtrip` is about 1.1 µs for Rivet versus about 25 µs for cocotb.
 
 cocotb's `value_traffic` number is dominated by converting the 512-bit
 `LogicArray` to an integer, which goes through a Python string
@@ -43,26 +43,30 @@ does not have, so there is no cocotb baseline here yet.
 
 | Test | Rivet |
 |---|---|
-| `timer_only` (one `Timer` per cycle, no clock) | 0.39 µs |
-| `clock_only` (clock task running, nothing awaiting it) | 1.19 µs |
-| `edge_roundtrip` | 1.67 µs |
-| `edge_roundtrip_immediate_clock` (clock with `NoDelay` writes, no ReadWrite flush) | 1.79 µs |
-| `edge_then_readonly` | 2.26 µs |
-| `value_traffic` | 2.65 µs |
-| `many_tasks` (100 tasks, per cycle) | 20.6 µs |
+| `timer_only` (one `Timer` per cycle, no clock) | 0.33 µs |
+| `clock_only` (clock task running, nothing awaiting it) | 0.98 µs |
+| `edge_roundtrip` | 1.49 µs |
+| `edge_roundtrip_immediate_clock` (clock with `NoDelay` writes, no ReadWrite flush) | 1.21 µs |
+| `edge_then_readonly` | 1.94 µs |
+| `value_traffic` | 1.76 µs |
+| `many_tasks` (100 tasks, per cycle) | 18.9 µs |
 
 The model is compiled with `-O2` in release builds (Verilator's default is
-`-Os`), which is worth 10 to 18% by itself.
+`-Os`), which is worth 10 to 18% by itself. Values are read and written
+directly in the model's storage (`VerilatedScope::varFind`), bypassing
+Verilator's VPI for everything except value-change detection; set
+`RIVET_VERILATOR_DIRECT=0` to compare against the VPI path.
 
 Each simulator event delivered to the harness (a timer, a value change, a
-phase callback) currently costs about 0.4 µs on Verilator, including the
-model evaluation that follows it. The Verilator backend already schedules
-timers and phase callbacks natively (`rivet-verilator/src/sched.rs`) instead
-of through VPI registrations, which took `edge_roundtrip` from 2.7 µs to
-2.0 µs before the `-O2` change. Remaining known costs, in likely order: two `eval_step` calls per
-half period (one after the timer, one after the ReadWrite flush), the
-per-event `HashMap` and `Box` traffic in the runtime, and the `Arc`-based
-wakers. Direct signal access without VPI (roadmap M5) is the next big step.
+phase callback) costs about 0.3 µs on Verilator, including the model
+evaluation that follows it. What got it here, in order: native timer and
+phase scheduling instead of VPI registrations (2.7 to 2.0 µs on
+`edge_roundtrip`), `-O2` model builds, direct value access, and replacing
+SipHash maps and per-event allocations in the runtime after a callgrind
+profile showed hashing at 15% and malloc/free at 11% of instructions.
+Remaining known costs: two `eval_step` calls per half period (after the
+timer and after the ReadWrite flush), Verilator's `callValueCbs` scan, and
+the thread-local runtime borrow on every call into the runtime.
 
 ## What these numbers are not
 

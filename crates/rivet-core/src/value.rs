@@ -102,12 +102,91 @@ impl fmt::Display for Unresolved {
 
 impl std::error::Error for Unresolved {}
 
+/// Word storage with inline capacity for vectors up to 64 bits, so the
+/// common case never touches the heap.
+#[derive(Clone)]
+enum Words {
+    Inline([u32; 2], u8),
+    Heap(Vec<u32>),
+}
+
+impl Words {
+    fn new(n: usize) -> Words {
+        if n <= 2 {
+            Words::Inline([0; 2], n as u8)
+        } else {
+            Words::Heap(vec![0; n])
+        }
+    }
+    #[inline]
+    fn as_slice(&self) -> &[u32] {
+        match self {
+            Words::Inline(a, n) => &a[..*n as usize],
+            Words::Heap(v) => v,
+        }
+    }
+    #[inline]
+    fn as_mut_slice(&mut self) -> &mut [u32] {
+        match self {
+            Words::Inline(a, n) => &mut a[..*n as usize],
+            Words::Heap(v) => v,
+        }
+    }
+    fn resize(&mut self, n: usize) {
+        match self {
+            Words::Inline(a, len) if n <= 2 => {
+                for w in a.iter_mut().skip(n) {
+                    *w = 0;
+                }
+                *len = n as u8;
+            }
+            Words::Inline(a, len) => {
+                let mut v = vec![0; n];
+                v[..*len as usize].copy_from_slice(&a[..*len as usize]);
+                *self = Words::Heap(v);
+            }
+            Words::Heap(v) => {
+                if n <= 2 {
+                    let mut a = [0u32; 2];
+                    for (i, w) in v.iter().take(n).enumerate() {
+                        a[i] = *w;
+                    }
+                    *self = Words::Inline(a, n as u8);
+                } else {
+                    v.resize(n, 0);
+                }
+            }
+        }
+    }
+    fn from_vec(v: Vec<u32>) -> Words {
+        if v.len() <= 2 {
+            let mut a = [0u32; 2];
+            a[..v.len()].copy_from_slice(&v);
+            Words::Inline(a, v.len() as u8)
+        } else {
+            Words::Heap(v)
+        }
+    }
+}
+
+impl PartialEq for Words {
+    fn eq(&self, other: &Words) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+impl Eq for Words {}
+impl std::hash::Hash for Words {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state)
+    }
+}
+
 /// A packed four-state vector, bit 0 is the least significant.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct LogicVec {
     width: u32,
-    aval: Vec<u32>,
-    bval: Vec<u32>,
+    aval: Words,
+    bval: Words,
 }
 
 #[inline]
@@ -119,15 +198,17 @@ impl LogicVec {
     /// All zeros.
     pub fn zeros(width: u32) -> LogicVec {
         let n = words_for(width);
-        LogicVec { width, aval: vec![0; n], bval: vec![0; n] }
+        LogicVec { width, aval: Words::new(n), bval: Words::new(n) }
     }
 
     /// All `X`.
     pub fn xs(width: u32) -> LogicVec {
         let mut v = LogicVec::zeros(width);
-        for w in 0..v.aval.len() {
-            v.aval[w] = u32::MAX;
-            v.bval[w] = u32::MAX;
+        for w in v.aval.as_mut_slice() {
+            *w = u32::MAX;
+        }
+        for w in v.bval.as_mut_slice() {
+            *w = u32::MAX;
         }
         v.mask_top();
         v
@@ -136,8 +217,8 @@ impl LogicVec {
     /// All `Z`.
     pub fn zs(width: u32) -> LogicVec {
         let mut v = LogicVec::zeros(width);
-        for w in 0..v.bval.len() {
-            v.bval[w] = u32::MAX;
+        for w in v.bval.as_mut_slice() {
+            *w = u32::MAX;
         }
         v.mask_top();
         v
@@ -148,7 +229,7 @@ impl LogicVec {
     pub fn from_planes(width: u32, aval: Vec<u32>, bval: Vec<u32>) -> LogicVec {
         assert_eq!(aval.len(), words_for(width));
         assert_eq!(bval.len(), words_for(width));
-        let mut v = LogicVec { width, aval, bval };
+        let mut v = LogicVec { width, aval: Words::from_vec(aval), bval: Words::from_vec(bval) };
         v.mask_top();
         v
     }
@@ -157,11 +238,12 @@ impl LogicVec {
     /// `width`.
     pub fn from_u64(width: u32, value: u64) -> LogicVec {
         let mut v = LogicVec::zeros(width);
-        if !v.aval.is_empty() {
-            v.aval[0] = value as u32;
+        let a = v.aval.as_mut_slice();
+        if !a.is_empty() {
+            a[0] = value as u32;
         }
-        if v.aval.len() > 1 {
-            v.aval[1] = (value >> 32) as u32;
+        if a.len() > 1 {
+            a[1] = (value >> 32) as u32;
         }
         v.mask_top();
         v
@@ -170,7 +252,7 @@ impl LogicVec {
     /// Two-state value from a 128-bit integer.
     pub fn from_u128(width: u32, value: u128) -> LogicVec {
         let mut v = LogicVec::zeros(width);
-        for (i, w) in v.aval.iter_mut().enumerate().take(4) {
+        for (i, w) in v.aval.as_mut_slice().iter_mut().enumerate().take(4) {
             *w = (value >> (32 * i)) as u32;
         }
         v.mask_top();
@@ -181,7 +263,7 @@ impl LogicVec {
     pub fn from_i64(width: u32, value: i64) -> LogicVec {
         let mut v = LogicVec::zeros(width);
         let bits = value as u64;
-        for (i, w) in v.aval.iter_mut().enumerate() {
+        for (i, w) in v.aval.as_mut_slice().iter_mut().enumerate() {
             *w = if i < 2 {
                 (bits >> (32 * i)) as u32
             } else if value < 0 {
@@ -263,12 +345,12 @@ impl LogicVec {
 
     #[inline]
     pub fn aval(&self) -> &[u32] {
-        &self.aval
+        self.aval.as_slice()
     }
 
     #[inline]
     pub fn bval(&self) -> &[u32] {
-        &self.bval
+        self.bval.as_slice()
     }
 
     /// Mutable access to the bit planes for zero-copy fills from a
@@ -276,7 +358,7 @@ impl LogicVec {
     /// [`LogicVec::mask_top`].
     #[inline]
     pub fn planes_mut(&mut self) -> (&mut [u32], &mut [u32]) {
-        (&mut self.aval, &mut self.bval)
+        (self.aval.as_mut_slice(), self.bval.as_mut_slice())
     }
 
     /// Clear bits above `width` in the top word.
@@ -284,10 +366,10 @@ impl LogicVec {
         let rem = self.width % 32;
         if rem != 0 {
             let mask = (1u32 << rem) - 1;
-            if let Some(w) = self.aval.last_mut() {
+            if let Some(w) = self.aval.as_mut_slice().last_mut() {
                 *w &= mask;
             }
-            if let Some(w) = self.bval.last_mut() {
+            if let Some(w) = self.bval.as_mut_slice().last_mut() {
                 *w &= mask;
             }
         }
@@ -296,8 +378,8 @@ impl LogicVec {
     /// Resize in place, keeping the low bits and zero-filling new ones.
     pub fn resize(&mut self, width: u32) {
         let n = words_for(width);
-        self.aval.resize(n, 0);
-        self.bval.resize(n, 0);
+        self.aval.resize(n);
+        self.bval.resize(n);
         self.width = width;
         self.mask_top();
     }
@@ -313,7 +395,7 @@ impl LogicVec {
         assert!(i < self.width, "bit index {i} out of range for width {}", self.width);
         let w = (i / 32) as usize;
         let m = 1u32 << (i % 32);
-        Logic::from_ab(self.aval[w] & m != 0, self.bval[w] & m != 0)
+        Logic::from_ab(self.aval.as_slice()[w] & m != 0, self.bval.as_slice()[w] & m != 0)
     }
 
     #[inline]
@@ -322,15 +404,17 @@ impl LogicVec {
         let w = (i / 32) as usize;
         let m = 1u32 << (i % 32);
         let (a, b) = v.to_ab();
+        let aw = &mut self.aval.as_mut_slice()[w];
         if a {
-            self.aval[w] |= m;
+            *aw |= m;
         } else {
-            self.aval[w] &= !m;
+            *aw &= !m;
         }
+        let bw = &mut self.bval.as_mut_slice()[w];
         if b {
-            self.bval[w] |= m;
+            *bw |= m;
         } else {
-            self.bval[w] &= !m;
+            *bw &= !m;
         }
     }
 
@@ -347,17 +431,17 @@ impl LogicVec {
     /// `true` if no bit is `X` or `Z`.
     #[inline]
     pub fn is_resolvable(&self) -> bool {
-        self.bval.iter().all(|w| *w == 0)
+        self.bval.as_slice().iter().all(|w| *w == 0)
     }
 
     /// `true` if any bit is `X`.
     pub fn has_x(&self) -> bool {
-        self.aval.iter().zip(&self.bval).any(|(a, b)| a & b != 0)
+        self.aval.as_slice().iter().zip(self.bval.as_slice()).any(|(a, b)| a & b != 0)
     }
 
     /// `true` if any bit is `Z`.
     pub fn has_z(&self) -> bool {
-        self.aval.iter().zip(&self.bval).any(|(a, b)| !a & b != 0)
+        self.aval.as_slice().iter().zip(self.bval.as_slice()).any(|(a, b)| !a & b != 0)
     }
 
     /// Zero-extended integer value; `Err` if any bit is `X`/`Z` or the
@@ -366,21 +450,22 @@ impl LogicVec {
         if !self.is_resolvable() {
             return Err(Unresolved { value: self.clone() });
         }
-        if self.aval.iter().skip(2).any(|w| *w != 0) {
+        let a = self.aval.as_slice();
+        if a.iter().skip(2).any(|w| *w != 0) {
             return Err(Unresolved { value: self.clone() });
         }
-        let lo = *self.aval.first().unwrap_or(&0) as u64;
-        let hi = *self.aval.get(1).unwrap_or(&0) as u64;
+        let lo = *a.first().unwrap_or(&0) as u64;
+        let hi = *a.get(1).unwrap_or(&0) as u64;
         Ok(lo | (hi << 32))
     }
 
     /// Zero-extended integer value up to 128 bits.
     pub fn to_u128(&self) -> Result<u128, Unresolved> {
-        if !self.is_resolvable() || self.aval.iter().skip(4).any(|w| *w != 0) {
+        if !self.is_resolvable() || self.aval.as_slice().iter().skip(4).any(|w| *w != 0) {
             return Err(Unresolved { value: self.clone() });
         }
         let mut v = 0u128;
-        for (i, w) in self.aval.iter().enumerate().take(4) {
+        for (i, w) in self.aval.as_slice().iter().enumerate().take(4) {
             v |= (*w as u128) << (32 * i);
         }
         Ok(v)
@@ -398,8 +483,9 @@ impl LogicVec {
 
     /// `to_u64` with `X`/`Z` bits resolved to zero.
     pub fn to_u64_lossy(&self) -> u64 {
-        let lo = (self.aval.first().copied().unwrap_or(0) & !self.bval.first().copied().unwrap_or(0)) as u64;
-        let hi = (self.aval.get(1).copied().unwrap_or(0) & !self.bval.get(1).copied().unwrap_or(0)) as u64;
+        let (a, b) = (self.aval.as_slice(), self.bval.as_slice());
+        let lo = (a.first().copied().unwrap_or(0) & !b.first().copied().unwrap_or(0)) as u64;
+        let hi = (a.get(1).copied().unwrap_or(0) & !b.get(1).copied().unwrap_or(0)) as u64;
         lo | (hi << 32)
     }
 
