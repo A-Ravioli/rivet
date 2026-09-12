@@ -101,11 +101,15 @@ jobs:
         with:
           path: /opt/verilator-5.036
           key: verilator-5.036-ubuntu-24.04-v1
-      - name: Build Verilator 5.036
-        if: steps.cache-verilator.outputs.cache-hit != 'true'
+      - name: Install Verilator's build and runtime dependencies
+        # Needed on every run: the cached tree's makefiles call ccache, and
+        # verilating a design needs perl, python3, g++ and libfl at run time.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git help2man perl python3 make autoconf g++ flex bison ccache libfl2 libfl-dev zlib1g-dev
+      - name: Build Verilator 5.036
+        if: steps.cache-verilator.outputs.cache-hit != 'true'
+        run: |
           git clone --depth 1 --branch v5.036 https://github.com/verilator/verilator.git /tmp/verilator
           cd /tmp/verilator && autoconf && ./configure --prefix=/opt/verilator-5.036 && make -j"$(nproc)" && sudo make install
       - name: Build CLI
