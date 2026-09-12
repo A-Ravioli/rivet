@@ -22,6 +22,8 @@ pub struct Opts {
     pub release: bool,
     pub filter: Option<String>,
     pub waves: bool,
+    /// One waveform file per test (Verilator).
+    pub waves_per_test: bool,
     pub package: Option<String>,
     pub dir: PathBuf,
     pub extra: Vec<String>,
@@ -42,6 +44,7 @@ impl Opts {
             release: false,
             filter: None,
             waves: false,
+            waves_per_test: false,
             package: None,
             dir,
             extra: Vec::new(),
@@ -65,6 +68,7 @@ pub fn usage() -> ! {
          \x20 --release                  build the harness in release mode\n\
          \x20 --filter <a,b>             run only tests whose name contains one of these\n\
          \x20 --waves                    dump waveforms\n\
+         \x20 --waves-per-test           one waveform file per test (Verilator)\n\
          \x20 --seed <n>                 random seed passed as RIVET_SEED\n\
          \x20 --log <level>              RIVET_LOG level (error|warn|info|debug|trace)\n\
          \x20 -o <file>                  bindgen: output file (default src/dut.rs)\n\
@@ -90,6 +94,10 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
             "--release" => o.release = true,
             "--filter" | "-k" => o.filter = it.next(),
             "--waves" => o.waves = true,
+            "--waves-per-test" => {
+                o.waves = true;
+                o.waves_per_test = true;
+            }
             "--seed" => o.seed = it.next(),
             "--log" => o.log = it.next(),
             "-o" | "--out" => o.out = it.next().map(PathBuf::from),
@@ -186,6 +194,24 @@ fn run_cmd(mut cmd: Command, verbose: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// The companion module compiled in for `--waves` on Icarus: dumps to
+/// `+rivet_wave=<file>` (default `default_file`) and lets the harness pause
+/// and resume dumping through `rivet_dump_enable` (`rivet::waves`).
+pub fn dump_module(default_file: &str, top: &str) -> String {
+    format!(
+        "module rivet_dump;\n  \
+           reg rivet_dump_enable = 1;\n  \
+           string rivet_dump_file;\n  \
+           initial begin\n    \
+             if (!$value$plusargs(\"rivet_wave=%s\", rivet_dump_file)) rivet_dump_file = \"{default_file}\";\n    \
+             $dumpfile(rivet_dump_file);\n    \
+             $dumpvars(0, {top});\n  \
+           end\n  \
+           always @(rivet_dump_enable) if (rivet_dump_enable) $dumpon; else $dumpoff;\n\
+         endmodule\n"
+    )
+}
+
 pub fn hash_inputs(paths: &[PathBuf], extra: &[String]) -> Result<u64, String> {
     let mut h = DefaultHasher::new();
     for p in paths {
@@ -222,15 +248,8 @@ fn build_icarus(m: &Manifest, opts: &Opts, sim_dir: &Path) -> Result<PathBuf, St
         // as cocotb does.
         let dump = sim_dir.join("rivet_dump.sv");
         let wave_file = sim_dir.join(format!("{}.fst", m.design.top));
-        std::fs::write(
-            &dump,
-            format!(
-                "module rivet_dump;\n  initial begin\n    $dumpfile(\"{}\");\n    $dumpvars(0, {});\n  end\nendmodule\n",
-                wave_file.display(),
-                m.design.top
-            ),
-        )
-        .map_err(|e| e.to_string())?;
+        std::fs::write(&dump, dump_module(&wave_file.display().to_string(), &m.design.top))
+            .map_err(|e| e.to_string())?;
         args.push("-s".into());
         args.push("rivet_dump".into());
         all_sources.push(dump);
@@ -333,7 +352,9 @@ fn common_env(cmd: &mut Command, opts: &Opts, m: &Manifest, results: &Path) {
     if let Some(l) = &opts.log {
         cmd.env("RIVET_LOG", l);
     }
-    if opts.waves {
+    if opts.waves_per_test {
+        cmd.env("RIVET_WAVES", "per-test");
+    } else if opts.waves {
         cmd.env("RIVET_WAVES", "1");
     }
     if let Some(d) = &opts.dump {

@@ -190,6 +190,8 @@ version = "0.1.0"
 dependencies = [
  "log",
  "rivet-core",
+ "rivet-kit",
+ "rivet-macros",
  "serde_json",
 ]
 

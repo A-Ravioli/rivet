@@ -5,11 +5,13 @@
 
 pub mod backend;
 pub mod clock;
+pub mod coverage;
 pub mod error;
 pub mod executor;
 pub mod fxhash;
 pub mod handle;
 pub mod log;
+pub mod random;
 pub mod runtime;
 pub mod sync;
 pub mod task;
@@ -17,12 +19,16 @@ pub mod test;
 pub mod time;
 pub mod triggers;
 pub mod value;
+pub mod waves;
 
-pub use backend::{Action, Backend, Capabilities, Handle, ObjInfo, ObjKind, OwnedValue, Value};
+pub use backend::{Action, Backend, Capabilities, Handle, ObjInfo, ObjKind, OwnedValue, Value, WaveCmd};
 pub use clock::Clock;
+pub use coverage::{Bins, CoverPoint, Covergroup, Cross};
 pub use error::{Error, Result};
+pub use executor::WaitOn;
 pub use handle::{Module, Object, Signal};
-pub use runtime::Phase;
+pub use random::{rng, Random, Randomize, Rng};
+pub use runtime::{dump_tasks, Phase};
 pub use sync::{Event, Lock, Queue};
 pub use task::{spawn, spawn_named, JoinHandle, Scope};
 pub use test::{Bind, TestDesc};

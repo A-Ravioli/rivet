@@ -20,6 +20,7 @@
 pub use rivet_core::*;
 pub use rivet_kit as kit;
 pub use rivet_macros::test;
+pub use rivet_macros::Randomize;
 
 #[cfg(feature = "verilator")]
 pub use rivet_verilator as verilator;
@@ -59,8 +60,8 @@ pub mod prelude {
         first, join, next_time_step, read_only, read_write, with_timeout, yield_now, Either, Timer,
     };
     pub use crate::{
-        bail, ensure, spawn, spawn_named, Clock, Event, IntoLogicVec, JoinHandle, Lock, Logic, LogicVec, Module, Queue,
-        Scope, Signal, TimeExt,
+        bail, ensure, rng, spawn, spawn_named, Bins, Clock, CoverPoint, Covergroup, Cross, Event, IntoLogicVec,
+        JoinHandle, Lock, Logic, LogicVec, Module, Queue, Random, Randomize, Rng, Scope, Signal, TimeExt,
     };
     pub use log::{debug, error, info, trace, warn};
 }

@@ -7,7 +7,7 @@
 //! through [`with`].
 
 use crate::backend::{Action, Backend, Capabilities, CbId, CbKind, Handle, OwnedValue, Value};
-use crate::executor::{Executor, TaskKey};
+use crate::executor::{Executor, TaskKey, WaitOn};
 use crate::fxhash::FxHashMap as HashMap;
 use crate::value::{Logic, LogicVec};
 use std::cell::RefCell;
@@ -256,10 +256,18 @@ pub fn run_to_idle() {
     let mut guard = 0u64;
     loop {
         let Some((key, mut task)) = with(|rt| rt.exec.next_ready()) else { break };
-        with(|rt| rt.exec.current = Some(key));
+        with(|rt| {
+            rt.exec.current = Some(key);
+            std::mem::swap(&mut rt.exec.current_name, &mut task.name);
+            rt.exec.current_wait = WaitOn::Unknown;
+        });
         let mut cx = Context::from_waker(&task.waker);
         let res = catch_unwind(AssertUnwindSafe(|| task.fut.as_mut().poll(&mut cx)));
-        with(|rt| rt.exec.current = None);
+        with(|rt| {
+            rt.exec.current = None;
+            std::mem::swap(&mut rt.exec.current_name, &mut task.name);
+            task.wait = rt.exec.current_wait;
+        });
         match res {
             Ok(Poll::Pending) => {
                 let leftover = with(|rt| rt.exec.park(key, task));
@@ -284,6 +292,124 @@ pub fn run_to_idle() {
             log::warn!("executor ran {guard} polls without returning to the simulator; possible busy loop");
         }
     }
+}
+
+/// Record what the task being polled is about to wait for. Cheap (a copy)
+/// and safe to call from any poll, including from inside a runtime borrow
+/// (it is then skipped).
+pub fn note_wait(w: WaitOn) {
+    RT.with(|cell| {
+        if let Ok(mut slot) = cell.try_borrow_mut() {
+            if let Some(rt) = slot.as_mut() {
+                rt.exec.current_wait = w;
+            }
+        }
+    });
+}
+
+fn describe_wait(rt: &mut Runtime, w: WaitOn) -> String {
+    let prec = rt.backend.precision();
+    match w {
+        WaitOn::Unknown => "(not waiting on a trigger)".to_string(),
+        WaitOn::Timer(at) => {
+            let now = rt.backend.now();
+            format!(
+                "Timer due at {} (+{})",
+                crate::time::format_time(at, prec, crate::time::Unit::Ns),
+                crate::time::format_time(at.saturating_sub(now), prec, crate::time::Unit::Ns)
+            )
+        }
+        WaitOn::Edge(h, kind) => {
+            let path = rt.backend.info(h).path.clone();
+            let name = match kind {
+                EdgeKind::Rising => "RisingEdge",
+                EdgeKind::Falling => "FallingEdge",
+                EdgeKind::Any => "ValueChange",
+            };
+            let mut v = LogicVec::zeros(0);
+            let cur = match rt.backend.read_vec(h, &mut v) {
+                Ok(()) => v.to_binstr(),
+                Err(_) => "?".into(),
+            };
+            format!("{name}({path}) [now {cur}]")
+        }
+        WaitOn::ReadWrite => "ReadWrite".into(),
+        WaitOn::ReadOnly => "ReadOnly".into(),
+        WaitOn::NextTimeStep => "NextTimeStep".into(),
+        WaitOn::Event => "Event".into(),
+        WaitOn::Queue => "Queue".into(),
+        WaitOn::Lock => "Lock".into(),
+        WaitOn::Join => "another task (join)".into(),
+        WaitOn::Yield => "yield".into(),
+        WaitOn::Other(s) => s.to_string(),
+    }
+}
+
+/// A human-readable list of every live task and what it is waiting for,
+/// for hang diagnostics. Included in timeout failures and printed on the
+/// wall-clock watchdog.
+pub fn dump_tasks() -> String {
+    use std::fmt::Write as _;
+    with(|rt| {
+        let mut out = String::new();
+        let now = rt.backend.now();
+        let prec = rt.backend.precision();
+        let parked = rt.exec.parked();
+        let _ = writeln!(
+            out,
+            "{} live task(s) at {} (phase {:?}, {} armed timer(s), {} buffered write(s)):",
+            rt.exec.live_count(),
+            crate::time::format_time(now, prec, crate::time::Unit::Ns),
+            rt.phase,
+            rt.timers.len(),
+            rt.writes.len()
+        );
+        if rt.exec.current.is_some() {
+            let _ = writeln!(out, "  {:<28} running", rt.exec.current_name);
+        }
+        for (name, w) in parked {
+            let _ = writeln!(out, "  {:<28} waiting for {}", name, describe_wait(rt, w));
+        }
+        out
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Wall-clock limit
+
+thread_local! {
+    static WALL_DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    static WALL_LIMIT_SECS: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+    static EVENT_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Fail the current test if it is still running after `secs` of wall-clock
+/// time. Checked on simulator events, so a testbench that never returns to
+/// the simulator is caught by the watchdog thread instead (see
+/// [`crate::test::start_watchdog`]).
+pub fn set_wall_limit(secs: Option<f64>) {
+    WALL_LIMIT_SECS.with(|c| c.set(secs.unwrap_or(0.0)));
+    WALL_DEADLINE.with(|c| c.set(secs.map(|s| std::time::Instant::now() + std::time::Duration::from_secs_f64(s))));
+}
+
+fn check_wall_clock() {
+    let n = EVENT_COUNT.with(|c| {
+        let n = c.get().wrapping_add(1);
+        c.set(n);
+        n
+    });
+    if n & 63 != 0 {
+        return;
+    }
+    let Some(deadline) = WALL_DEADLINE.with(|c| c.get()) else { return };
+    if std::time::Instant::now() < deadline {
+        return;
+    }
+    WALL_DEADLINE.with(|c| c.set(None));
+    let secs = WALL_LIMIT_SECS.with(|c| c.get());
+    let dump = dump_tasks();
+    log::error!("wall-clock limit of {secs}s exceeded\n{dump}");
+    report_failure(format!("wall-clock limit of {secs}s exceeded\n{dump}"));
 }
 
 pub fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
@@ -326,6 +452,7 @@ pub fn dispatch(ev: Event) {
         return;
     }
     REACTING.with(|r| r.set(true));
+    check_wall_clock();
     handle_event(ev);
     run_to_idle();
     while let Some(ev) = DEFERRED.with(|d| d.borrow_mut().pop_front()) {
@@ -608,6 +735,7 @@ impl Future for TestFailed {
                 Some(f) => Poll::Ready(f),
                 None => {
                     t.waker = Some(cx.waker().clone());
+                    rt.exec.current_wait = WaitOn::Other("a test failure");
                     Poll::Pending
                 }
             },

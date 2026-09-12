@@ -252,6 +252,31 @@ thread_local! {
     static KERNEL: RefCell<Option<std::rc::Weak<RefCell<Kernel>>>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// Wave log of the most recently dropped kernel, so a test can inspect
+    /// it after the simulation ended.
+    static LAST_WAVES: RefCell<Vec<WaveCmd>> = const { RefCell::new(Vec::new()) };
+}
+
+impl Drop for Kernel {
+    fn drop(&mut self) {
+        let waves = std::mem::take(&mut self.waves);
+        LAST_WAVES.with(|w| *w.borrow_mut() = waves);
+    }
+}
+
+/// Waveform commands the harness sent (for tests of `rivet_core::waves`):
+/// the live kernel's, or the last finished simulation's.
+pub fn wave_log() -> Vec<WaveCmd> {
+    KERNEL.with(|k| {
+        let k = k.borrow();
+        match k.as_ref().and_then(|w| w.upgrade()) {
+            Some(rc) => rc.borrow().waves.clone(),
+            None => LAST_WAVES.with(|w| w.borrow().clone()),
+        }
+    })
+}
+
 /// Simulator-side counters for tests: `(pending timers, registered value
 /// callbacks, stats)`.
 pub fn kernel_stats() -> (usize, usize, Stats) {
@@ -287,6 +312,7 @@ struct Kernel {
     nts: Vec<CbId>,
     finished: bool,
     pub stats: Stats,
+    waves: Vec<WaveCmd>,
 }
 
 /// Counters for benchmarking the harness.
@@ -321,6 +347,7 @@ impl Kernel {
             nts: Vec::new(),
             finished: false,
             stats: Stats::default(),
+            waves: Vec::new(),
         }
     }
 
@@ -569,6 +596,10 @@ impl Backend for MockBackend {
     fn finish(&mut self) {
         self.k.borrow_mut().finished = true;
     }
+    fn waves(&mut self, cmd: WaveCmd) -> Result<()> {
+        self.k.borrow_mut().waves.push(cmd);
+        Ok(())
+    }
 }
 
 /// Drives the kernel. Obtained from [`MockBackend::install`].
@@ -724,6 +755,8 @@ where
     Fut: std::future::Future<Output = rivet_core::Result<()>> + 'static,
 {
     rivet_core::log::init();
+    // Reproducible streams for `rivet_core::rng()` inside the body.
+    rivet_core::random::begin_test("mock::run_test");
     let mut sim = design.into_backend().install();
     let result: Rc<RefCell<Option<rivet_core::Result<()>>>> = Rc::new(RefCell::new(None));
     let slot = result.clone();

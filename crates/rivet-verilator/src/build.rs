@@ -291,6 +291,7 @@ int rivet_vl_vpi_call_value_cbs() {{ return VerilatedVpi::callValueCbs() ? 1 : 0
 void rivet_vl_vpi_call_timed_cbs() {{ VerilatedVpi::callTimedCbs(); }}
 uint64_t rivet_vl_vpi_next_deadline() {{ return VerilatedVpi::cbNextDeadline(); }}
 int rivet_vl_trace_supported() {{ return VM_TRACE; }}
+int rivet_vl_trace_fst() {{ return VM_TRACE_FST; }}
 // Direct access to a public variable's storage (what --public-flat-rw
 // registers for VPI). Returns 1 if found and packed-only (no unpacked dims).
 int rivet_vl_var_find(const char* scope, const char* name, void** datap, int* vltype, int* width, int* is_param) {{

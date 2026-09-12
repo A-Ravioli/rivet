@@ -8,32 +8,32 @@ use rivet_core::{inventory, Module, TimeExt};
 use rivet_mock::Design;
 
 inventory::submit! {
-    TestDesc { name: "b_passes", module: "suite", run: |_dut: Module| boxed(async { Timer::steps(3).await; Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0 }
+    TestDesc { name: "b_passes", module: "suite", run: |_dut: Module| boxed(async { Timer::steps(3).await; Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "a_fails", module: "suite", run: |_| boxed(async { Err(rivet_core::Error::Msg("nope".into())) }), timeout: || None, skip: false, expect_fail: false, stage: 0 }
+    TestDesc { name: "a_fails", module: "suite", run: |_| boxed(async { Err(rivet_core::Error::Msg("nope".into())) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "c_expected_failure", module: "suite", run: |_| boxed(async { rivet_core::bail!("meant to") }), timeout: || None, skip: false, expect_fail: true, stage: 0 }
+    TestDesc { name: "c_expected_failure", module: "suite", run: |_| boxed(async { rivet_core::bail!("meant to") }), timeout: || None, skip: false, expect_fail: true, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "d_unexpected_pass", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: true, stage: 0 }
+    TestDesc { name: "d_unexpected_pass", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: true, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "e_skipped", module: "suite", run: |_| boxed(async { panic!("never runs") }), timeout: || None, skip: true, expect_fail: false, stage: 0 }
+    TestDesc { name: "e_skipped", module: "suite", run: |_| boxed(async { panic!("never runs") }), timeout: || None, skip: true, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "f_times_out", module: "suite", run: |_| boxed(async { Timer::new(1.ms()).await; Ok(()) }), timeout: || Some(20.ns()), skip: false, expect_fail: false, stage: 0 }
+    TestDesc { name: "f_times_out", module: "suite", run: |_| boxed(async { Timer::new(1.ms()).await; Ok(()) }), timeout: || Some(20.ns()), skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "g_panics", module: "suite", run: |_| boxed(async { Timer::steps(1).await; panic!("kaboom") }), timeout: || None, skip: false, expect_fail: false, stage: 0 }
+    TestDesc { name: "g_panics", module: "suite", run: |_| boxed(async { Timer::steps(1).await; panic!("kaboom") }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
     TestDesc { name: "h_child_panics", module: "suite", run: |_| boxed(async {
         let _h = rivet_core::spawn(async { Timer::steps(1).await; panic!("child kaboom") });
         Timer::steps(5).await;
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0 }
+    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
     TestDesc { name: "z_first_by_stage", module: "suite", run: |dut: Module| boxed(async move {
@@ -41,13 +41,13 @@ inventory::submit! {
         assert_eq!(dut.signal("x").unwrap().get_u64_lossy(), 0);
         dut.signal("x").unwrap().set_now(1);
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: -1 }
+    }), timeout: || None, skip: false, expect_fail: false, stage: -1, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "bad_timeout", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || Some(1.5.steps()), skip: false, expect_fail: false, stage: 1 }
+    TestDesc { name: "bad_timeout", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || Some(1.5.steps()), skip: false, expect_fail: false, stage: 1, wall_timeout: None, param_sets: &[] }
 }
 inventory::submit! {
-    TestDesc { name: "other_module", module: "elsewhere", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0 }
+    TestDesc { name: "other_module", module: "elsewhere", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
 }
 
 fn design() -> Design {
@@ -66,6 +66,7 @@ fn full_regression_outcomes_and_order() {
         [
             "z_first_by_stage",
             "other_module",
+            "any_set",
             "a_fails",
             "b_passes",
             "c_expected_failure",
@@ -167,4 +168,29 @@ fn simulator_ending_early_fails_the_running_test() {
     });
     let msg = r.unwrap_err().to_string();
     assert!(msg.contains("ended before"), "{msg}");
+}
+
+inventory::submit! {
+    TestDesc { name: "only_w16", module: "sets", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &["w16"] }
+}
+inventory::submit! {
+    TestDesc { name: "any_set", module: "sets", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+}
+
+#[test]
+fn param_sets_select_tests() {
+    use rivet_core::test::selected;
+    let tests = all_tests();
+    let only = tests.iter().find(|t| t.name == "only_w16").unwrap();
+    let any = tests.iter().find(|t| t.name == "any_set").unwrap();
+    std::env::remove_var("RIVET_PARAM_SET");
+    assert!(!selected(only, None), "set-specific test skipped without a set");
+    assert!(selected(any, None));
+    std::env::set_var("RIVET_PARAM_SET", "w8");
+    assert!(!selected(only, None));
+    std::env::set_var("RIVET_PARAM_SET", "w16");
+    assert!(selected(only, None));
+    assert!(selected(any, Some("any")));
+    assert_eq!(rivet_core::test::param_set().as_deref(), Some("w16"));
+    std::env::remove_var("RIVET_PARAM_SET");
 }

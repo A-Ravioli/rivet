@@ -30,7 +30,8 @@ extern "C" {
     fn rivet_vl_vpi_call_value_cbs() -> c_int;
     fn rivet_vl_vpi_call_timed_cbs();
     fn rivet_vl_vpi_next_deadline() -> u64;
-    fn rivet_vl_trace_supported() -> c_int;
+    pub(crate) fn rivet_vl_trace_supported() -> c_int;
+    fn rivet_vl_trace_fst() -> c_int;
     fn rivet_vl_trace_open(p: *mut c_void, file: *const c_char) -> *mut c_void;
     fn rivet_vl_trace_dump(t: *mut c_void, time: u64);
     fn rivet_vl_trace_close(t: *mut c_void);
@@ -101,9 +102,32 @@ pub fn run(opts: Options) -> i32 {
                 return 2;
             }
             let file = opts.trace_file.clone().unwrap_or_else(|| "dump.vcd".to_string());
-            let cfile = CString::new(file).unwrap();
-            trace = rivet_vl_trace_open(top, cfile.as_ptr());
+            let mut s = sched.borrow_mut();
+            s.wave_on = true;
+            s.wave_file = Some(file);
+            s.wave_dirty = true;
         }
+        let ext = if rivet_vl_trace_fst() != 0 { "fst" } else { "vcd" };
+        // (Re)open the dump file when the harness asked for a new one.
+        let apply_waves = |trace: &mut *mut c_void| {
+            let mut s = sched.borrow_mut();
+            if !s.wave_dirty {
+                return;
+            }
+            s.wave_dirty = false;
+            if !trace.is_null() {
+                rivet_vl_trace_dump(*trace, rivet_vl_time());
+                rivet_vl_trace_close(*trace);
+                *trace = std::ptr::null_mut();
+            }
+            if let Some(f) = s.wave_file.clone() {
+                let file = if f.contains('.') { f } else { format!("{f}.{ext}") };
+                log::info!("waveform file {file}");
+                let cfile = CString::new(file).unwrap();
+                *trace = rivet_vl_trace_open(top, cfile.as_ptr());
+            }
+        };
+        apply_waves(&mut trace);
 
         rivet_vl_vpi_call_cbs(cbStartOfSimulation as u32);
         settle_value_callbacks();
@@ -141,7 +165,8 @@ pub fn run(opts: Options) -> i32 {
             if std::mem::take(&mut sched.borrow_mut().ro) {
                 runtime::dispatch(Event::ReadOnly);
             }
-            if !trace.is_null() {
+            apply_waves(&mut trace);
+            if !trace.is_null() && sched.borrow().wave_on {
                 rivet_vl_trace_dump(trace, rivet_vl_time());
             }
             if finished() {

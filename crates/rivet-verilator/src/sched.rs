@@ -124,6 +124,10 @@ pub struct NativeSched {
     pub nts: bool,
     next: u64,
     pub finished: bool,
+    /// Waveform state requested by the harness; the main loop applies it.
+    pub wave_on: bool,
+    pub wave_file: Option<String>,
+    pub wave_dirty: bool,
 }
 
 impl NativeSched {
@@ -351,5 +355,20 @@ impl Backend for VerilatorBackend {
     }
     fn argv(&self) -> Vec<String> {
         self.vpi.argv()
+    }
+    fn waves(&mut self, cmd: WaveCmd) -> Result<()> {
+        if unsafe { crate::rivet_vl_trace_supported() } == 0 {
+            return Err(BackendError::Unsupported("model built without tracing (rivet.toml: trace = true)".into()));
+        }
+        let mut s = self.sched.borrow_mut();
+        match cmd {
+            WaveCmd::On => s.wave_on = true,
+            WaveCmd::Off => s.wave_on = false,
+            WaveCmd::File(f) => {
+                s.wave_file = Some(f);
+                s.wave_dirty = true;
+            }
+        }
+        Ok(())
     }
 }

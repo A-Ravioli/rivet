@@ -27,6 +27,10 @@ pub struct TestDesc {
     pub expect_fail: bool,
     /// Tests are stable-sorted by stage.
     pub stage: i32,
+    /// Wall-clock limit in seconds (`RIVET_WALL_TIMEOUT` applies when `None`).
+    pub wall_timeout: Option<f64>,
+    /// Manifest parameter sets this test runs under (empty: all).
+    pub param_sets: &'static [&'static str],
 }
 
 inventory::collect!(TestDesc);
@@ -45,6 +49,8 @@ pub struct TestResult {
     pub outcome: Outcome,
     pub sim_time_steps: u64,
     pub wall_secs: f64,
+    /// The test's random seed (derived from the run's base seed).
+    pub seed: u64,
 }
 
 /// All tests visible to this binary, in execution order.
@@ -60,6 +66,12 @@ pub fn all_tests() -> Vec<&'static TestDesc> {
 /// test runs if any of them matches its name or `module::name`. An empty
 /// or absent filter selects everything.
 pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
+    if !t.param_sets.is_empty() {
+        match param_set() {
+            Some(set) if t.param_sets.contains(&set.as_str()) => {}
+            _ => return false,
+        }
+    }
     match filter {
         Some(f) if !f.trim().is_empty() => f
             .split(',')
@@ -67,6 +79,12 @@ pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
             .any(|pat| t.name == pat || t.name.contains(pat) || format!("{}::{}", t.module, t.name).contains(pat)),
         _ => true,
     }
+}
+
+/// The manifest parameter set this process was built for
+/// (`RIVET_PARAM_SET`), if any.
+pub fn param_set() -> Option<String> {
+    std::env::var("RIVET_PARAM_SET").ok().filter(|s| !s.is_empty())
 }
 
 /// Run every registered test selected by `RIVET_TEST_FILTER`. Spawned by
@@ -82,9 +100,10 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
     let mut results = Vec::new();
     let total = tests.iter().filter(|t| selected(t, filter)).count();
     log::info!(
-        "running {} test(s) on {}",
+        "running {} test(s) on {} (seed {})",
         total,
-        runtime::with(|rt| format!("{} {}", rt.backend.name(), rt.backend.version()))
+        runtime::with(|rt| format!("{} {}", rt.backend.name(), rt.backend.version())),
+        crate::random::base_seed()
     );
     let mut idx = 0;
     for t in tests {
@@ -100,6 +119,7 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
                 outcome: Outcome::Skipped,
                 sim_time_steps: 0,
                 wall_secs: 0.0,
+                seed: 0,
             });
             continue;
         }
@@ -107,10 +127,19 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             // One time step between tests, as in cocotb.
             Timer::steps(1).await;
         }
-        log::info!("running {}::{} ({idx}/{total})", t.module, t.name);
+        let seed = crate::random::begin_test(&format!("{}::{}", t.module, t.name));
+        crate::log::begin_test(t.module, t.name);
+        log::info!("running {}::{} ({idx}/{total}, seed {seed})", t.module, t.name);
         let wall = Instant::now();
         let start = runtime::now();
         runtime::begin_test();
+        let wall_limit = t.wall_timeout.or_else(wall_timeout_from_env);
+        runtime::set_wall_limit(wall_limit);
+        watchdog_arm(wall_limit, &format!("{}::{}", t.module, t.name));
+        let waves_per_test = std::env::var("RIVET_WAVES").map(|v| v == "per-test").unwrap_or(false);
+        if waves_per_test {
+            crate::waves::start(Some(&format!("{}__{}", t.module.replace("::", "_"), t.name)));
+        }
         // Evaluate and convert the timeout under a guard: a bad expression
         // must fail this test, not the regression task.
         let timeout = match std::panic::catch_unwind(|| (t.timeout)().map(|d| (d, d.to_steps(precision)))) {
@@ -125,6 +154,11 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             Err(msg) => Outcome::Failed(msg),
         };
         let recorded = runtime::end_test();
+        runtime::set_wall_limit(None);
+        watchdog_arm(None, "");
+        if waves_per_test {
+            crate::waves::off();
+        }
         // Tear down: cancel everything the test started, drop buffered writes.
         runtime::cancel_all_other_tasks();
         runtime::discard_pending_writes();
@@ -152,12 +186,14 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             Outcome::Failed(msg) => log::error!("{}::{} FAILED: {msg}", t.module, t.name),
             Outcome::Skipped => {}
         }
+        crate::log::end_test();
         results.push(TestResult {
             name: t.name.to_string(),
             module: t.module.to_string(),
             outcome,
             sim_time_steps,
             wall_secs: wall.elapsed().as_secs_f64(),
+            seed,
         });
     }
     results
@@ -175,10 +211,69 @@ async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<(D
     match timeout {
         Some((d, steps)) => match first(body, Timer::steps(steps.max(1))).await {
             Either::Left(o) => o,
-            Either::Right(()) => Outcome::Failed(format!("timed out after {d} of simulated time")),
+            Either::Right(()) => {
+                Outcome::Failed(format!("timed out after {d} of simulated time\n{}", runtime::dump_tasks()))
+            }
         },
         None => body.await,
     }
+}
+
+/// `RIVET_WALL_TIMEOUT` in seconds, if set and valid.
+pub fn wall_timeout_from_env() -> Option<f64> {
+    std::env::var("RIVET_WALL_TIMEOUT").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|s| *s > 0.0)
+}
+
+// ---------------------------------------------------------------------------
+// Watchdog: a thread that aborts the process when a test runs past its
+// wall-clock limit plus a grace period without the runtime noticing (the
+// simulator is stuck, or a task never yields).
+
+static WATCHDOG: std::sync::Mutex<Option<(std::time::Instant, String)>> = std::sync::Mutex::new(None);
+static WATCHDOG_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn watchdog_arm(limit: Option<f64>, test: &str) {
+    let mut g = WATCHDOG.lock().unwrap_or_else(|e| e.into_inner());
+    *g = limit.map(|s| (Instant::now() + std::time::Duration::from_secs_f64(s + watchdog_grace()), test.to_string()));
+    if limit.is_some() && !WATCHDOG_STARTED.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        start_watchdog();
+    }
+}
+
+/// Extra seconds the watchdog waits beyond the limit before killing the
+/// process, giving the in-band check a chance to fail the test cleanly.
+/// `RIVET_WATCHDOG_GRACE` overrides it.
+pub const WATCHDOG_GRACE_SECS: f64 = 5.0;
+
+fn watchdog_grace() -> f64 {
+    std::env::var("RIVET_WATCHDOG_GRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(WATCHDOG_GRACE_SECS)
+}
+
+/// Arm the watchdog directly (for tests of the watchdog itself).
+#[doc(hidden)]
+pub fn watchdog_arm_for_tests(limit_secs: f64, test: &str) {
+    watchdog_arm(Some(limit_secs), test);
+}
+
+/// Start the watchdog thread. Called automatically when a wall-clock limit
+/// is set; exposed so embedding harnesses can start it early.
+pub fn start_watchdog() {
+    std::thread::Builder::new()
+        .name("rivet-watchdog".into())
+        .spawn(|| loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let g = WATCHDOG.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((deadline, test)) = g.as_ref() {
+                if Instant::now() > *deadline {
+                    eprintln!(
+                        "rivet: watchdog: test {test} exceeded its wall-clock limit and the simulator is not \
+                         returning control to the harness; aborting the process"
+                    );
+                    std::process::exit(3);
+                }
+            }
+        })
+        .expect("spawn watchdog thread");
 }
 
 /// Print the summary table and return the number of failures.
@@ -209,7 +304,7 @@ pub fn summarize_with(results: &[TestResult], precision: i32) -> usize {
     let passed = results.iter().filter(|r| r.outcome == Outcome::Passed).count();
     let skipped = results.iter().filter(|r| r.outcome == Outcome::Skipped).count();
     eprintln!();
-    eprintln!("RIVET_RESULT passed={passed} failed={failed} skipped={skipped}");
+    eprintln!("RIVET_RESULT passed={passed} failed={failed} skipped={skipped} seed={}", crate::random::base_seed());
     failed
 }
 
@@ -271,6 +366,7 @@ pub fn write_results_xml_with(
             )
             .unwrap();
             writeln!(s, r#"        <property name="sim_time_unit" value="ns" />"#).unwrap();
+            writeln!(s, r#"        <property name="random_seed" value="{}" />"#, r.seed).unwrap();
             writeln!(s, "      </properties>").unwrap();
             match &r.outcome {
                 Outcome::Failed(msg) => writeln!(s, r#"      <failure message="{}" />"#, xml(msg)).unwrap(),
@@ -395,12 +491,80 @@ pub fn install_default_entry() {
 fn finish_with(results: &[TestResult]) {
     let failed = summarize(results);
     let sim = runtime::with(|rt| rt.backend.name().to_string());
+    let precision = runtime::precision();
     let path = std::env::var("RIVET_RESULTS_FILE").unwrap_or_else(|_| "results.xml".to_string());
     if let Err(e) = write_results_xml(std::path::Path::new(&path), results, &sim) {
         log::error!("cannot write {path}: {e}");
     }
+    if let Ok(p) = std::env::var("RIVET_RESULTS_JSON") {
+        if let Err(e) = std::fs::write(&p, results_json(results, &sim, precision)) {
+            log::error!("cannot write {p}: {e}");
+        }
+    }
+    if !crate::coverage::groups().is_empty() {
+        eprintln!("{}", crate::coverage::render_table());
+        eprintln!("RIVET_COVERAGE percent={:.2}", crate::coverage::percent());
+    }
+    if let Ok(p) = std::env::var("RIVET_COVERAGE_FILE") {
+        if let Err(e) = crate::coverage::write_json(std::path::Path::new(&p)) {
+            log::error!("cannot write {p}: {e}");
+        }
+    }
     runtime::with(|rt| rt.exit_code = if failed > 0 { 1 } else { 0 });
     runtime::finish();
+}
+
+/// Results as JSON, for merging across shards and parameter sets
+/// (`rivet run --jobs`). Read back by the CLI.
+pub fn results_json(results: &[TestResult], sim: &str, precision: i32) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = write!(
+        s,
+        "{{\"simulator\":{},\"precision\":{precision},\"seed\":{},\"tests\":[",
+        json_str(sim),
+        crate::random::base_seed()
+    );
+    for (i, r) in results.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        let (outcome, message) = match &r.outcome {
+            Outcome::Passed => ("passed", String::new()),
+            Outcome::Failed(m) => ("failed", m.clone()),
+            Outcome::Skipped => ("skipped", String::new()),
+        };
+        let _ = write!(
+            s,
+            "{{\"name\":{},\"module\":{},\"outcome\":\"{outcome}\",\"message\":{},\"sim_time_steps\":{},\"wall_secs\":{},\"seed\":{}}}",
+            json_str(&r.name),
+            json_str(&r.module),
+            json_str(&message),
+            r.sim_time_steps,
+            r.wall_secs,
+            r.seed
+        );
+    }
+    s.push_str("]}");
+    s
+}
+
+fn json_str(v: &str) -> String {
+    let mut out = String::with_capacity(v.len() + 2);
+    out.push('"');
+    for c in v.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Convenience for building a `TestDesc::run` from an async fn.
@@ -433,6 +597,8 @@ mod tests {
             skip: false,
             expect_fail: false,
             stage,
+            wall_timeout: None,
+            param_sets: &[],
         }
     }
 
@@ -458,6 +624,7 @@ mod tests {
                 outcome: Outcome::Passed,
                 sim_time_steps: 1500,
                 wall_secs: 0.5,
+                seed: 1,
             },
             TestResult {
                 name: "b<>&\"".into(),
@@ -465,6 +632,7 @@ mod tests {
                 outcome: Outcome::Failed("x < y & \"z\"".into()),
                 sim_time_steps: 0,
                 wall_secs: 0.25,
+                seed: 2,
             },
             TestResult {
                 name: "c".into(),
@@ -472,6 +640,7 @@ mod tests {
                 outcome: Outcome::Skipped,
                 sim_time_steps: 0,
                 wall_secs: 0.0,
+                seed: 0,
             },
         ];
         let dir = std::env::temp_dir().join(format!("rivet-xml-{}", std::process::id()));

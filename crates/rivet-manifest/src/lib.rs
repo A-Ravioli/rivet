@@ -14,6 +14,9 @@
 //! [design.params]
 //! WIDTH = "8"
 //!
+//! [design.param_sets.w16]   # optional: rebuild and rerun per set
+//! WIDTH = "16"
+//!
 //! [sim.icarus]
 //! args = ["-g2012"]
 //!
@@ -52,6 +55,10 @@ pub struct Design {
     /// `verilog` (default) or `vhdl`.
     #[serde(default)]
     pub language: Option<String>,
+    /// Named top-level parameter overrides; `rivet run` builds and runs the
+    /// design once per set (`[design.param_sets.w16] WIDTH = "16"`).
+    #[serde(default)]
+    pub param_sets: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -99,6 +106,17 @@ impl Manifest {
     pub fn sim(&self, name: &str) -> SimConfig {
         self.sim.get(name).cloned().unwrap_or_default()
     }
+
+    /// Effective parameters for a set (base `params` overridden by the set).
+    pub fn params_for(&self, set: Option<&str>) -> BTreeMap<String, String> {
+        let mut p = self.design.params.clone();
+        if let Some(name) = set {
+            if let Some(over) = self.design.param_sets.get(name) {
+                p.extend(over.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
+        p
+    }
 }
 
 #[cfg(test)]
@@ -125,6 +143,10 @@ SIM = "1"
 
 [design.params]
 WIDTH = "8"
+DEPTH = "4"
+
+[design.param_sets.w16]
+WIDTH = "16"
 
 [sim.icarus]
 args = ["-g2012"]
@@ -144,6 +166,11 @@ timing = true
         assert_eq!(m.includes_abs(), vec![dir.join("inc")]);
         assert_eq!(m.design.defines["SIM"], "1");
         assert_eq!(m.design.params["WIDTH"], "8");
+        assert_eq!(m.design.param_sets["w16"]["WIDTH"], "16");
+        let p = m.params_for(Some("w16"));
+        assert_eq!((p["WIDTH"].as_str(), p["DEPTH"].as_str()), ("16", "4"));
+        assert_eq!(m.params_for(None)["WIDTH"], "8");
+        assert_eq!(m.params_for(Some("missing"))["WIDTH"], "8");
         assert_eq!(m.design.timescale.as_deref(), Some("1ns/1ps"));
         assert_eq!(m.sim("icarus").args, vec!["-g2012"]);
         assert_eq!(m.sim("icarus").run_args, vec!["+foo=1"]);

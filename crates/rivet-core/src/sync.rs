@@ -62,6 +62,7 @@ impl Future for EventWait {
             Poll::Ready(())
         } else {
             g.waiters.push(cx.waker().clone());
+            crate::runtime::note_wait(crate::executor::WaitOn::Event);
             Poll::Pending
         }
     }
@@ -189,8 +190,10 @@ impl<T> Future for QueueWait<T> {
         } else {
             if self.for_get {
                 g.getters.push_back(cx.waker().clone());
+                crate::runtime::note_wait(crate::executor::WaitOn::Queue);
             } else {
                 g.putters.push_back(cx.waker().clone());
+                crate::runtime::note_wait(crate::executor::WaitOn::Queue);
             }
             Poll::Pending
         }
@@ -241,6 +244,7 @@ impl Future for LockAcquire {
             Poll::Ready(())
         } else {
             g.waiters.push_back(cx.waker().clone());
+            crate::runtime::note_wait(crate::executor::WaitOn::Lock);
             Poll::Pending
         }
     }

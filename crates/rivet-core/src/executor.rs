@@ -28,6 +28,29 @@ pub(crate) struct Task {
     pub name: String,
     pub waker: Waker,
     pub queued: Arc<AtomicBool>,
+    /// What the task registered for the last time it was polled; shown by
+    /// [`crate::runtime::dump_tasks`].
+    pub wait: WaitOn,
+}
+
+/// What a parked task is waiting for. Recorded by the trigger futures when
+/// they register, so a hang can be explained without a debugger.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum WaitOn {
+    #[default]
+    Unknown,
+    /// A timer due at this absolute step.
+    Timer(u64),
+    Edge(crate::backend::Handle, crate::runtime::EdgeKind),
+    ReadWrite,
+    ReadOnly,
+    NextTimeStep,
+    Event,
+    Queue,
+    Lock,
+    Join,
+    Yield,
+    Other(&'static str),
 }
 
 enum SlotState {
@@ -71,12 +94,35 @@ pub(crate) struct Executor {
     free: Vec<u32>,
     ready: Arc<ReadyQueue>,
     pub current: Option<TaskKey>,
+    /// Name of the task being polled (for dumps while running).
+    pub current_name: String,
+    /// Wait recorded by the task currently being polled.
+    pub current_wait: WaitOn,
     live: usize,
 }
 
 impl Executor {
     pub fn new() -> Executor {
-        Executor { slots: Vec::new(), free: Vec::new(), ready: Arc::default(), current: None, live: 0 }
+        Executor {
+            slots: Vec::new(),
+            free: Vec::new(),
+            ready: Arc::default(),
+            current: None,
+            current_name: String::new(),
+            current_wait: WaitOn::Unknown,
+            live: 0,
+        }
+    }
+
+    /// `(name, wait)` for every parked task, in slot order.
+    pub fn parked(&self) -> Vec<(String, WaitOn)> {
+        self.slots
+            .iter()
+            .filter_map(|s| match &s.state {
+                SlotState::Parked(t) => Some((t.name.clone(), t.wait)),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn spawn(&mut self, name: String, fut: Pin<Box<dyn Future<Output = ()>>>) -> TaskKey {
@@ -91,7 +137,7 @@ impl Executor {
         let key = TaskKey { idx, gen: slot.gen };
         let queued = Arc::new(AtomicBool::new(false));
         let waker = Waker::from(Arc::new(TaskWaker { key, queue: self.ready.clone(), queued: queued.clone() }));
-        slot.state = SlotState::Parked(Task { fut, name, waker: waker.clone(), queued });
+        slot.state = SlotState::Parked(Task { fut, name, waker: waker.clone(), queued, wait: WaitOn::Unknown });
         self.live += 1;
         waker.wake();
         key

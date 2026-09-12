@@ -8,9 +8,11 @@
 //!   run them as tasks fed by a [`Queue`].
 
 pub mod handshake;
+pub mod reset;
 pub mod scoreboard;
 
 pub use handshake::{ValidReadySink, ValidReadySource};
+pub use reset::Reset;
 pub use scoreboard::Scoreboard;
 
 use rivet_core::handle::Signal;
@@ -20,13 +22,11 @@ use std::future::Future;
 
 /// Hold `rst` asserted for `cycles` rising edges of `clk`, then release it
 /// and wait one more edge. Returns in the values-change phase of that edge.
+/// See [`Reset`] for asynchronous resets and other options.
 pub async fn reset(clk: Signal, rst: Signal, active_low: bool, cycles: u32) {
-    rst.set(!active_low);
-    for _ in 0..cycles {
-        clk.rising_edge().await;
-    }
-    rst.set(active_low);
-    clk.rising_edge().await;
+    let r = Reset::new(clk, rst).cycles(cycles).settle(1);
+    let r = if active_low { r.active_low() } else { r };
+    r.apply().await
 }
 
 /// Something that can send transactions into the design.

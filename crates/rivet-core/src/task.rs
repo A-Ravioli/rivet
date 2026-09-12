@@ -122,6 +122,7 @@ impl<T> Future for JoinHandle<T> {
             Some(r) => Poll::Ready(r),
             None => {
                 inner.waker = Some(cx.waker().clone());
+                runtime::note_wait(crate::executor::WaitOn::Join);
                 Poll::Pending
             }
         }

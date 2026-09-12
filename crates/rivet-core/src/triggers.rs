@@ -6,6 +6,7 @@
 
 use crate::backend::{CbId, CbKind, Handle};
 use crate::error::Error;
+use crate::executor::WaitOn;
 use crate::runtime::{self, EdgeKind, Phase};
 use crate::time::Duration;
 use std::future::Future;
@@ -40,14 +41,22 @@ impl Future for Timer {
         }
         match self.cb {
             None => {
-                let id = runtime::with(|rt| rt.add_timer(self.steps, cx.waker().clone()));
+                let steps = self.steps;
+                let id = runtime::with(|rt| {
+                    rt.exec.current_wait = WaitOn::Timer(rt.backend.now() + steps);
+                    rt.add_timer(steps, cx.waker().clone())
+                });
                 self.cb = Some(id);
                 Poll::Pending
             }
             Some(id) => {
                 let pending = runtime::with(|rt| rt.timers_contains(id));
                 if pending {
-                    runtime::with(|rt| rt.update_timer_waker(id, cx.waker().clone()));
+                    let steps = self.steps;
+                    runtime::with(|rt| {
+                        rt.exec.current_wait = WaitOn::Timer(rt.backend.now() + steps);
+                        rt.update_timer_waker(id, cx.waker().clone())
+                    });
                     Poll::Pending
                 } else {
                     self.fired = true;
@@ -92,13 +101,20 @@ impl Future for Edge {
         match self.waiter {
             None => {
                 let (h, k) = (self.handle, self.kind);
-                let id = runtime::with(|rt| rt.add_edge_waiter(h, k, cx.waker().clone()));
+                let id = runtime::with(|rt| {
+                    rt.exec.current_wait = WaitOn::Edge(h, k);
+                    rt.add_edge_waiter(h, k, cx.waker().clone())
+                });
                 self.waiter = Some(id);
                 Poll::Pending
             }
             Some(id) => {
                 let h = self.handle;
-                let still_waiting = runtime::with(|rt| rt.edge_waiter_pending(h, id, cx.waker()));
+                let k = self.kind;
+                let still_waiting = runtime::with(|rt| {
+                    rt.exec.current_wait = WaitOn::Edge(h, k);
+                    rt.edge_waiter_pending(h, id, cx.waker())
+                });
                 if still_waiting {
                     Poll::Pending
                 } else {
@@ -144,7 +160,10 @@ impl Future for PhaseTrigger {
                 panic!("illegal transition: awaiting {:?} in the ReadOnly phase", self.kind);
             }
             let kind = self.kind;
-            self.gen = runtime::with(|rt| rt.add_phase_waiter(kind, cx.waker().clone()));
+            self.gen = runtime::with(|rt| {
+                rt.exec.current_wait = phase_wait(kind);
+                rt.add_phase_waiter(kind, cx.waker().clone())
+            });
             self.registered = true;
             return Poll::Pending;
         }
@@ -153,9 +172,20 @@ impl Future for PhaseTrigger {
         if runtime::with(|rt| rt.phase_fired(kind, gen)) {
             Poll::Ready(())
         } else {
-            runtime::with(|rt| rt.add_phase_waiter_existing(kind, cx.waker().clone()));
+            runtime::with(|rt| {
+                rt.exec.current_wait = phase_wait(kind);
+                rt.add_phase_waiter_existing(kind, cx.waker().clone())
+            });
             Poll::Pending
         }
+    }
+}
+
+fn phase_wait(kind: CbKind) -> WaitOn {
+    match kind {
+        CbKind::ReadWrite => WaitOn::ReadWrite,
+        CbKind::ReadOnly => WaitOn::ReadOnly,
+        _ => WaitOn::NextTimeStep,
     }
 }
 
@@ -200,6 +230,7 @@ impl Future for YieldNow {
             Poll::Ready(())
         } else {
             self.0 = true;
+            runtime::note_wait(WaitOn::Yield);
             cx.waker().wake_by_ref();
             Poll::Pending
         }

@@ -22,6 +22,8 @@ pub struct ClockBuilder {
     high_steps: Option<u64>,
     start_high: bool,
     action: Action,
+    phase_steps: u64,
+    jitter_steps: u64,
 }
 
 impl ClockBuilder {
@@ -47,6 +49,21 @@ impl ClockBuilder {
         self
     }
 
+    /// Delay before the first edge, for clocks with a phase offset from
+    /// another clock (default: none).
+    pub fn phase(mut self, offset: Duration) -> Self {
+        self.phase_steps = offset.to_steps(runtime::precision());
+        self
+    }
+
+    /// Random jitter: every edge moves by a uniform amount in
+    /// `[-max, +max]`, drawn from the test's seeded stream, so the clock is
+    /// reproducible with the same seed. The period is preserved on average.
+    pub fn jitter(mut self, max: Duration) -> Self {
+        self.jitter_steps = max.to_steps(runtime::precision());
+        self
+    }
+
     pub fn start(self) -> Clock {
         let precision = runtime::precision();
         let period = self.period.to_steps(precision);
@@ -54,20 +71,37 @@ impl ClockBuilder {
         let high = self.high_steps.unwrap_or(period / 2);
         assert!(high > 0 && high < period, "clock high time must be within the period");
         let low = period - high;
+        assert!(self.jitter_steps < high.min(low), "clock jitter must be smaller than each half period");
         let signal = self.signal;
         let action = self.action;
         let start_high = self.start_high;
+        let phase = self.phase_steps;
+        let jitter = self.jitter_steps;
         let one = LogicVec::from_u64(1, 1);
         let zero = LogicVec::from_u64(1, 0);
         let task = spawn_named(&format!("clock({})", signal.path()), async move {
+            let mut rng = if jitter > 0 { Some(crate::random::rng()) } else { None };
+            if phase > 0 {
+                Timer::steps(phase).await;
+            }
             let mut high_next = start_high;
+            // Jitter shifts an edge without accumulating: the next half
+            // period compensates so the average period stays exact.
+            let mut carry: i64 = 0;
             loop {
                 let v = if high_next { &one } else { &zero };
                 runtime::with(|rt| {
                     rt.schedule_write(signal.handle(), crate::backend::OwnedValue::Vec(v.clone()), action)
                 })
                 .unwrap_or_else(|e| panic!("clock write failed: {e}"));
-                Timer::steps(if high_next { high } else { low }).await;
+                let nominal = if high_next { high } else { low } as i64;
+                let shift = match rng.as_mut() {
+                    Some(r) => r.gen_range(-(jitter as i64)..=jitter as i64),
+                    None => 0,
+                };
+                let wait = nominal - carry + shift;
+                carry = shift;
+                Timer::steps(wait.max(1) as u64).await;
                 high_next = !high_next;
             }
         });
@@ -78,7 +112,15 @@ impl ClockBuilder {
 impl Clock {
     /// Configure a clock with the given period.
     pub fn builder(signal: Signal, period: Duration) -> ClockBuilder {
-        ClockBuilder { signal, period, high_steps: None, start_high: true, action: Action::Deposit }
+        ClockBuilder {
+            signal,
+            period,
+            high_steps: None,
+            start_high: true,
+            action: Action::Deposit,
+            phase_steps: 0,
+            jitter_steps: 0,
+        }
     }
 
     /// Start a 50% duty-cycle clock, first edge rising.

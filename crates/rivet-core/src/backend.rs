@@ -116,6 +116,15 @@ pub enum CbKind {
     NextTimeStep,
 }
 
+/// Waveform dumping control (see [`crate::waves`]).
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum WaveCmd {
+    On,
+    Off,
+    /// Switch to a new dump file (base name; the backend adds the extension).
+    File(String),
+}
+
 /// Identifier of a registered callback.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct CbId(pub u64);
@@ -192,5 +201,10 @@ pub trait Backend {
     /// Simulator command line, if available.
     fn argv(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Control waveform dumping. Backends that cannot return `Unsupported`.
+    fn waves(&mut self, cmd: WaveCmd) -> Result<()> {
+        Err(BackendError::Unsupported(format!("waveform control ({cmd:?}) on {}", self.name())))
     }
 }

@@ -74,6 +74,8 @@ pub struct VpiBackend {
     /// GHDL's VPI has no vpiVectorVal; move values as binary strings.
     string_values: bool,
     str_buf: Vec<u8>,
+    /// `rivet_dump.rivet_dump_enable`, resolved on first use.
+    dump_enable: Option<vpiHandle>,
 }
 
 impl VpiBackend {
@@ -138,6 +140,7 @@ impl VpiBackend {
             vec_buf: Vec::new(),
             string_values: sim == Sim::Ghdl,
             str_buf: Vec::new(),
+            dump_enable: None,
         }
     }
 
@@ -747,6 +750,37 @@ impl Backend for VpiBackend {
     fn finish(&mut self) {
         unsafe {
             vpi_control(vpiFinish, 0i32);
+        }
+    }
+
+    fn waves(&mut self, cmd: WaveCmd) -> Result<()> {
+        // `rivet run --waves` compiles in a `rivet_dump` module whose
+        // `rivet_dump_enable` register gates `$dumpon`/`$dumpoff`.
+        match cmd {
+            WaveCmd::File(_) => Err(BackendError::Unsupported(format!(
+                "{} dumps one file per run; per-test files need Verilator",
+                self.product
+            ))),
+            WaveCmd::On | WaveCmd::Off => {
+                let raw = match self.dump_enable {
+                    Some(r) => r,
+                    None => {
+                        let name = CString::new("rivet_dump.rivet_dump_enable").unwrap();
+                        let r = unsafe { vpi_handle_by_name(name.as_ptr(), std::ptr::null_mut()) };
+                        if r.is_null() {
+                            return Err(BackendError::Unsupported(
+                                "no rivet_dump module in the design (run with --waves)".into(),
+                            ));
+                        }
+                        self.dump_enable = Some(r);
+                        r
+                    }
+                };
+                let mut val = s_vpi_value::new(vpiIntVal);
+                val.value.integer = if cmd == WaveCmd::On { 1 } else { 0 };
+                unsafe { vpi_put_value(raw, &mut val, std::ptr::null_mut(), vpiNoDelay) };
+                self.check_error("vpi_put_value(rivet_dump_enable)")
+            }
         }
     }
 
