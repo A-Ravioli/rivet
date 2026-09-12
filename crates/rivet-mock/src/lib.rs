@@ -58,7 +58,8 @@ pub struct Design {
 
 impl Design {
     pub fn new(top: &str) -> Design {
-        let mut d = Design { nodes: Vec::new(), procs: Vec::new(), events: BTreeMap::new(), precision: -12, root: Handle(0) };
+        let mut d =
+            Design { nodes: Vec::new(), procs: Vec::new(), events: BTreeMap::new(), precision: -12, root: Handle(0) };
         d.root = d.add_node(None, top, ObjKind::Module, 0);
         d
     }
@@ -197,7 +198,10 @@ impl ProcCtx<'_> {
 
     pub fn fell(&self, h: Handle) -> bool {
         let n = &self.k.nodes[h.0 as usize];
-        self.changed.contains(&h) && n.value.width() > 0 && n.value.bit(0) == Logic::Zero && n.prev.bit(0) != Logic::Zero
+        self.changed.contains(&h)
+            && n.value.width() > 0
+            && n.value.bit(0) == Logic::Zero
+            && n.prev.bit(0) != Logic::Zero
     }
 
     /// Blocking assignment: visible immediately.
@@ -346,7 +350,8 @@ impl Kernel {
 
     fn take_dirty_callbacks(&mut self) -> Vec<Handle> {
         let dirty = std::mem::take(&mut self.dirty);
-        let mut out: Vec<Handle> = dirty.into_iter().filter(|h| self.value_cbs.get(h).map(|v| !v.is_empty()).unwrap_or(false)).collect();
+        let mut out: Vec<Handle> =
+            dirty.into_iter().filter(|h| self.value_cbs.get(h).map(|v| !v.is_empty()).unwrap_or(false)).collect();
         out.sort_by_key(|h| h.0);
         out
     }

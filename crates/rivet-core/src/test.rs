@@ -74,7 +74,11 @@ pub async fn run_regression(root: Module) -> Vec<TestResult> {
     let precision = runtime::precision();
     let mut results = Vec::new();
     let total = tests.iter().filter(|t| selected(t)).count();
-    log::info!("running {} test(s) on {}", total, runtime::with(|rt| format!("{} {}", rt.backend.name(), rt.backend.version())));
+    log::info!(
+        "running {} test(s) on {}",
+        total,
+        runtime::with(|rt| format!("{} {}", rt.backend.name(), rt.backend.version()))
+    );
     let mut idx = 0;
     for t in tests {
         if !selected(t) {
@@ -285,9 +289,7 @@ pub fn install_default_entry() {
         });
     });
     runtime::set_premature_end_handler(|| {
-        log::error!(
-            "simulator ended before all tests finished (an HDL $finish or assertion, or no clock running?)"
-        );
+        log::error!("simulator ended before all tests finished (an HDL $finish or assertion, or no clock running?)");
         runtime::report_failure("simulator ended prematurely".into());
         // Give the regression task a chance to record the failure.
         runtime::run_to_idle();

@@ -92,11 +92,7 @@ impl Duration {
         };
         assert!(self.value >= 0.0, "duration must be non-negative");
         let scale = exp - precision;
-        let raw = if scale >= 0 {
-            self.value * 10f64.powi(scale)
-        } else {
-            self.value / 10f64.powi(-scale)
-        };
+        let raw = if scale >= 0 { self.value * 10f64.powi(scale) } else { self.value / 10f64.powi(-scale) };
         // Clean up floating point noise before checking representability.
         let rounded = raw.round();
         let exact = (raw - rounded).abs() < 1e-6 * rounded.abs().max(1.0);
@@ -166,11 +162,7 @@ pub fn format_time(steps: u64, precision: i32, unit: Unit) -> String {
         return format!("{steps} steps");
     };
     let scale = precision - exp;
-    let v = if scale >= 0 {
-        steps as f64 * 10f64.powi(scale)
-    } else {
-        steps as f64 / 10f64.powi(-scale)
-    };
+    let v = if scale >= 0 { steps as f64 * 10f64.powi(scale) } else { steps as f64 / 10f64.powi(-scale) };
     format!("{v}{}", unit.suffix())
 }
 

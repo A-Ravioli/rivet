@@ -112,7 +112,7 @@ pub struct LogicVec {
 
 #[inline]
 fn words_for(width: u32) -> usize {
-    ((width as usize) + 31) / 32
+    (width as usize).div_ceil(32)
 }
 
 impl LogicVec {
@@ -182,7 +182,13 @@ impl LogicVec {
         let mut v = LogicVec::zeros(width);
         let bits = value as u64;
         for (i, w) in v.aval.iter_mut().enumerate() {
-            *w = if i < 2 { (bits >> (32 * i)) as u32 } else if value < 0 { u32::MAX } else { 0 };
+            *w = if i < 2 {
+                (bits >> (32 * i)) as u32
+            } else if value < 0 {
+                u32::MAX
+            } else {
+                0
+            };
         }
         v.mask_top();
         v
@@ -192,8 +198,7 @@ impl LogicVec {
     /// `01xzXZ` plus VHDL `uwlhUWLH-`. Underscores are ignored. Width is the
     /// number of digits.
     pub fn from_binstr(s: &str) -> Option<LogicVec> {
-        let digits: Vec<Logic> =
-            s.chars().filter(|c| *c != '_').map(Logic::from_char).collect::<Option<_>>()?;
+        let digits: Vec<Logic> = s.chars().filter(|c| *c != '_').map(Logic::from_char).collect::<Option<_>>()?;
         let mut v = LogicVec::zeros(digits.len() as u32);
         for (i, d) in digits.iter().rev().enumerate() {
             v.set_bit(i as u32, *d);
@@ -406,7 +411,7 @@ impl LogicVec {
     /// Hex string, most significant nibble first. A nibble with any `X` is
     /// `x`; with any `Z` (and no `X`) is `z`.
     pub fn to_hexstr(&self) -> String {
-        let nibbles = (self.width + 3) / 4;
+        let nibbles = self.width.div_ceil(4);
         let mut s = String::with_capacity(nibbles as usize);
         for n in (0..nibbles).rev() {
             let lo = n * 4;
@@ -528,9 +533,7 @@ impl IntoLogicVec for bool {
 
 impl IntoLogicVec for &str {
     fn into_logic_vec(self, width: u32) -> LogicVec {
-        LogicVec::parse(self)
-            .unwrap_or_else(|| panic!("cannot parse {self:?} as a logic vector"))
-            .into_logic_vec(width)
+        LogicVec::parse(self).unwrap_or_else(|| panic!("cannot parse {self:?} as a logic vector")).into_logic_vec(width)
     }
 }
 

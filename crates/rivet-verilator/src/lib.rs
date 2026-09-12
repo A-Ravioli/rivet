@@ -4,9 +4,13 @@
 //! through Verilator's VPI shim via [`rivet_vpi`].
 
 pub mod build;
+pub mod sched;
 pub use build::Build;
 
-use rivet_vpi::ffi::{cbEndOfSimulation, cbNextSimTime, cbReadOnlySynch, cbReadWriteSynch, cbStartOfSimulation};
+use rivet_core::runtime::{self, Event};
+use sched::VerilatorBackend;
+
+use rivet_vpi::ffi::{cbEndOfSimulation, cbStartOfSimulation};
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
 
@@ -83,7 +87,13 @@ pub fn run(opts: Options) -> i32 {
     argv.push(std::ptr::null_mut());
     unsafe {
         let top = rivet_vl_new(args.len() as c_int, argv.as_mut_ptr());
-        rivet_vpi::startup();
+        let mut sched_slot = None;
+        rivet_vpi::startup_with(|vpi| {
+            let (b, s) = VerilatorBackend::new(vpi);
+            sched_slot = Some(s);
+            Box::new(b)
+        });
+        let sched = sched_slot.expect("scheduler");
         let mut trace: *mut c_void = std::ptr::null_mut();
         if opts.trace {
             if rivet_vl_trace_supported() == 0 {
@@ -98,7 +108,8 @@ pub fn run(opts: Options) -> i32 {
         rivet_vl_vpi_call_cbs(cbStartOfSimulation as u32);
         settle_value_callbacks();
 
-        while rivet_vl_got_finish() == 0 {
+        let finished = || rivet_vl_got_finish() != 0 || sched.borrow().finished;
+        while !finished() {
             // Evaluation cycles until values settle, then ReadWrite; if the
             // ReadWrite callbacks wrote anything, evaluate again.
             loop {
@@ -108,34 +119,52 @@ pub fn run(opts: Options) -> i32 {
                         break;
                     }
                 }
-                let rw_called = rivet_vl_vpi_call_cbs(cbReadWriteSynch as u32) != 0;
-                let changed = settle_value_callbacks();
-                if !rw_called && !changed {
+                let rw = std::mem::take(&mut sched.borrow_mut().rw);
+                if !rw {
                     break;
                 }
-                if rivet_vl_got_finish() != 0 {
+                runtime::dispatch(Event::ReadWrite);
+                let changed = settle_value_callbacks();
+                if !changed && !sched.borrow().rw {
+                    // Writes made in the ReadWrite phase went straight to the
+                    // model (NoDelay on Verilator); one more eval settles them.
+                    rivet_vl_eval_step(top);
+                    if !settle_value_callbacks() {
+                        break;
+                    }
+                }
+                if finished() {
                     break;
                 }
             }
             rivet_vl_eval_end_step(top);
-            rivet_vl_vpi_call_cbs(cbReadOnlySynch as u32);
+            if std::mem::take(&mut sched.borrow_mut().ro) {
+                runtime::dispatch(Event::ReadOnly);
+            }
             if !trace.is_null() {
                 rivet_vl_trace_dump(trace, rivet_vl_time());
             }
-            if rivet_vl_got_finish() != 0 {
+            if finished() {
                 break;
             }
-            // Jump to the next harness deadline or HDL timing event.
+            // Jump to the next harness deadline, VPI deadline, or HDL event.
+            let next_native = sched.borrow().next_deadline().unwrap_or(NO_DEADLINE);
             let next_cb = rivet_vl_vpi_next_deadline();
             let next_hdl = if rivet_vl_events_pending(top) != 0 { rivet_vl_next_time_slot(top) } else { NO_DEADLINE };
-            let next = next_cb.min(next_hdl);
+            let next = next_native.min(next_cb).min(next_hdl);
             if next == NO_DEADLINE {
                 log::debug!("no pending callbacks or events; ending simulation");
                 break;
             }
             rivet_vl_set_time(next);
-            rivet_vl_vpi_call_cbs(cbNextSimTime as u32);
+            if std::mem::take(&mut sched.borrow_mut().nts) {
+                runtime::dispatch(Event::NextTimeStep);
+            }
             settle_value_callbacks();
+            let due = sched.borrow_mut().take_due(next);
+            for id in due {
+                runtime::dispatch(Event::Timer(id));
+            }
             rivet_vl_vpi_call_timed_cbs();
             settle_value_callbacks();
         }

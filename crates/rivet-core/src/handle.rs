@@ -143,7 +143,7 @@ impl Module {
                 cur = cur.as_module()?.child(name)?;
             }
             for i in indices {
-                cur = cur.as_module().or_else(|_| Err(Error::Msg(format!("{} is not indexable", cur.path()))))?.index(i)?;
+                cur = cur.as_module().map_err(|_| Error::Msg(format!("{} is not indexable", cur.path())))?.index(i)?;
             }
         }
         Ok(cur)

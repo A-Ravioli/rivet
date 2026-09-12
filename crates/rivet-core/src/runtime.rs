@@ -87,8 +87,6 @@ pub struct Runtime {
     pub(crate) exec: Executor,
     pub(crate) caps: Capabilities,
     pub(crate) phase: Phase,
-    reacting: bool,
-    deferred: VecDeque<Event>,
     timers: HashMap<CbId, Waker>,
     edges: HashMap<Handle, EdgeReg>,
     next_waiter_id: u64,
@@ -111,6 +109,12 @@ pub struct Runtime {
 
 thread_local! {
     static RT: RefCell<Option<Runtime>> = const { RefCell::new(None) };
+    /// Set while a simulator event is being handled. Lives outside `RT` so
+    /// a simulator that fires a callback synchronously from inside a
+    /// `vpi_put_value` (Icarus, Xcelium, Questa) can be answered while the
+    /// runtime is still borrowed by the write.
+    static REACTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static DEFERRED: RefCell<VecDeque<Event>> = const { RefCell::new(VecDeque::new()) };
 }
 
 /// Install the runtime. Called once by the backend's startup routine.
@@ -121,8 +125,6 @@ pub fn init(backend: Box<dyn Backend>) {
         exec: Executor::new(),
         caps,
         phase: Phase::Startup,
-        reacting: false,
-        deferred: VecDeque::new(),
         timers: HashMap::new(),
         edges: HashMap::new(),
         next_waiter_id: 1,
@@ -148,6 +150,8 @@ pub fn init(backend: Box<dyn Backend>) {
 
 /// Tear down the runtime (tests and shutdown).
 pub fn shutdown() -> Option<Box<dyn Backend>> {
+    REACTING.with(|r| r.set(false));
+    DEFERRED.with(|d| d.borrow_mut().clear());
     let rt = RT.with(|cell| cell.borrow_mut().take())?;
     // Drop tasks before the backend so trigger destructors can deregister.
     let Runtime { backend, exec, .. } = rt;
@@ -260,7 +264,7 @@ pub fn run_to_idle() {
             }
         }
         guard += 1;
-        if guard % 1_000_000 == 0 {
+        if guard.is_multiple_of(1_000_000) {
             log::warn!("executor ran {guard} polls without returning to the simulator; possible busy loop");
         }
     }
@@ -301,25 +305,18 @@ pub fn report_failure(msg: String) {
 /// change from inside a write) are queued and drained after the current
 /// event, exactly as cocotb's VPI callback queue does.
 pub fn dispatch(ev: Event) {
-    let deferred = with(|rt| {
-        if rt.reacting {
-            rt.deferred.push_back(ev);
-            true
-        } else {
-            rt.reacting = true;
-            false
-        }
-    });
-    if deferred {
+    if REACTING.with(|r| r.get()) {
+        DEFERRED.with(|d| d.borrow_mut().push_back(ev));
         return;
     }
+    REACTING.with(|r| r.set(true));
     handle_event(ev);
     run_to_idle();
-    while let Some(ev) = with(|rt| rt.deferred.pop_front()) {
+    while let Some(ev) = DEFERRED.with(|d| d.borrow_mut().pop_front()) {
         handle_event(ev);
         run_to_idle();
     }
-    with(|rt| rt.reacting = false);
+    REACTING.with(|r| r.set(false));
 }
 
 fn handle_event(ev: Event) {
@@ -469,10 +466,8 @@ impl Runtime {
     }
 
     pub(crate) fn add_timer(&mut self, steps: u64, waker: Waker) -> CbId {
-        let id = self
-            .backend
-            .register(CbKind::AfterDelay(steps))
-            .unwrap_or_else(|e| panic!("cannot register timer: {e}"));
+        let id =
+            self.backend.register(CbKind::AfterDelay(steps)).unwrap_or_else(|e| panic!("cannot register timer: {e}"));
         self.timers.insert(id, waker);
         id
     }
@@ -540,11 +535,17 @@ impl Runtime {
     // -----------------------------------------------------------------------
     // Values
 
-    pub(crate) fn schedule_write(&mut self, h: Handle, value: OwnedValue, action: Action) -> crate::backend::Result<()> {
+    pub(crate) fn schedule_write(
+        &mut self,
+        h: Handle,
+        value: OwnedValue,
+        action: Action,
+    ) -> crate::backend::Result<()> {
         if self.phase == Phase::EndTimeStep {
             panic!("writing to a signal in the ReadOnly phase is not allowed");
         }
-        let write_now = action != Action::Deposit || self.caps.trusts_inertial_writes || self.phase == Phase::ValuesSettle;
+        let write_now =
+            action != Action::Deposit || self.caps.trusts_inertial_writes || self.phase == Phase::ValuesSettle;
         if write_now {
             return self.backend.write(h, owned_as_value(&value), action);
         }
@@ -614,7 +615,6 @@ pub fn finish() {
         rt.backend.finish();
     });
 }
-
 
 /// Exit code decided by the regression (0 pass, 1 failures).
 pub fn exit_code() -> i32 {

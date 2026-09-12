@@ -182,11 +182,8 @@ impl<T> Future for QueueWait<T> {
     type Output = ();
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let mut g = self.inner.borrow_mut();
-        let ready = if self.for_get {
-            !g.items.is_empty()
-        } else {
-            !g.capacity.map(|c| g.items.len() >= c).unwrap_or(false)
-        };
+        let ready =
+            if self.for_get { !g.items.is_empty() } else { !g.capacity.map(|c| g.items.len() >= c).unwrap_or(false) };
         if ready {
             Poll::Ready(())
         } else {

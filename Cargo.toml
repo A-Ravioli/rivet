@@ -10,6 +10,7 @@ members = [
     "crates/rivet",
     "crates/rivet-cli",
     "examples/dff",
+    "examples/bench",
 ]
 
 [workspace.package]

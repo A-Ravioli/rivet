@@ -20,14 +20,19 @@
 pub use rivet_core::*;
 pub use rivet_macros::test;
 
-#[cfg(feature = "vpi")]
-pub use rivet_vpi as vpi;
 #[cfg(feature = "verilator")]
 pub use rivet_verilator as verilator;
+#[cfg(feature = "vpi")]
+pub use rivet_vpi as vpi;
 
 /// Everything a testbench usually needs.
 pub mod prelude {
-    pub use crate::triggers::{first, join, next_time_step, read_only, read_write, with_timeout, yield_now, Either, Timer};
-    pub use crate::{bail, ensure, spawn, spawn_named, Clock, Event, JoinHandle, Lock, Logic, LogicVec, Module, Queue, Scope, Signal, TimeExt};
+    pub use crate::triggers::{
+        first, join, next_time_step, read_only, read_write, with_timeout, yield_now, Either, Timer,
+    };
+    pub use crate::{
+        bail, ensure, spawn, spawn_named, Clock, Event, JoinHandle, Lock, Logic, LogicVec, Module, Queue, Scope,
+        Signal, TimeExt,
+    };
     pub use log::{debug, error, info, trace, warn};
 }

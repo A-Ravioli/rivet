@@ -63,8 +63,10 @@ impl ClockBuilder {
             let mut high_next = start_high;
             loop {
                 let v = if high_next { &one } else { &zero };
-                runtime::with(|rt| rt.schedule_write(signal.handle(), crate::backend::OwnedValue::Vec(v.clone()), action))
-                    .unwrap_or_else(|e| panic!("clock write failed: {e}"));
+                runtime::with(|rt| {
+                    rt.schedule_write(signal.handle(), crate::backend::OwnedValue::Vec(v.clone()), action)
+                })
+                .unwrap_or_else(|e| panic!("clock write failed: {e}"));
                 Timer::steps(if high_next { high } else { low }).await;
                 high_next = !high_next;
             }
@@ -75,13 +77,13 @@ impl ClockBuilder {
 
 impl Clock {
     /// Configure a clock with the given period.
-    pub fn new(signal: Signal, period: Duration) -> ClockBuilder {
+    pub fn builder(signal: Signal, period: Duration) -> ClockBuilder {
         ClockBuilder { signal, period, high_steps: None, start_high: true, action: Action::Deposit }
     }
 
     /// Start a 50% duty-cycle clock, first edge rising.
     pub fn start(signal: Signal, period: Duration) -> Clock {
-        Clock::new(signal, period).start()
+        Clock::builder(signal, period).start()
     }
 
     pub fn stop(&self) {

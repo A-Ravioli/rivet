@@ -73,7 +73,8 @@ pub struct VpiBackend {
 }
 
 fn parse_version(v: &str) -> (u32, u32, u32) {
-    let mut it = v.trim().split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).map(|s| s.parse::<u32>().unwrap_or(0));
+    let mut it =
+        v.trim().split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).map(|s| s.parse::<u32>().unwrap_or(0));
     (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
 }
 
@@ -81,7 +82,12 @@ impl VpiBackend {
     /// Query the simulator and build a backend with the right quirks.
     pub fn new() -> VpiBackend {
         let (product, version) = unsafe {
-            let mut info = s_vpi_vlog_info { argc: 0, argv: std::ptr::null_mut(), product: std::ptr::null_mut(), version: std::ptr::null_mut() };
+            let mut info = s_vpi_vlog_info {
+                argc: 0,
+                argv: std::ptr::null_mut(),
+                product: std::ptr::null_mut(),
+                version: std::ptr::null_mut(),
+            };
             let ok = vpi_get_vlog_info(&mut info);
             if ok != 0 {
                 (cstr(info.product), cstr(info.version))
@@ -163,7 +169,9 @@ impl VpiBackend {
     fn classify(&self, raw: vpiHandle, vtype: i32, name: String, path: String) -> ObjInfo {
         let size = unsafe { vpi_get(vpiSize, raw) };
         let (kind, width, is_const) = match vtype {
-            vpiModule | vpiInterface | vpiProgram | vpiGenScope | vpiInternalScope | vpiPort => (ObjKind::Module, 0, false),
+            vpiModule | vpiInterface | vpiProgram | vpiGenScope | vpiInternalScope | vpiPort => {
+                (ObjKind::Module, 0, false)
+            }
             vpiGenScopeArray | vpiModuleArray | vpiInterfaceArray => (ObjKind::GenArray, size.max(0) as u32, false),
             vpiPackage => (ObjKind::Package, 0, false),
             vpiStructVar | vpiStructNet => {
@@ -175,7 +183,9 @@ impl VpiBackend {
             }
             vpiNetArray | vpiRegArray | vpiMemory => (ObjKind::Array, size.max(0) as u32, false),
             vpiRealVar => (ObjKind::Real, 64, false),
-            vpiIntegerVar | vpiIntVar | vpiLongIntVar | vpiShortIntVar | vpiByteVar | vpiTimeVar => (ObjKind::Integer, size.max(0) as u32, false),
+            vpiIntegerVar | vpiIntVar | vpiLongIntVar | vpiShortIntVar | vpiByteVar | vpiTimeVar => {
+                (ObjKind::Integer, size.max(0) as u32, false)
+            }
             vpiEnumVar => (ObjKind::Enum, size.max(0) as u32, false),
             vpiStringVar => (ObjKind::String, 0, false),
             vpiParameter | vpiConstant => {
@@ -186,7 +196,8 @@ impl VpiBackend {
                     _ => (ObjKind::LogicVec, size.max(0) as u32, true),
                 }
             }
-            vpiNet | vpiReg | vpiRegBit | vpiBitVar | vpiMemoryWord | vpiPackedArrayVar | vpiBitSelect | vpiPartSelect | vpiVarSelect | vpiArrayMember => {
+            vpiNet | vpiReg | vpiRegBit | vpiBitVar | vpiMemoryWord | vpiPackedArrayVar | vpiBitSelect
+            | vpiPartSelect | vpiVarSelect | vpiArrayMember => {
                 if size == 1 {
                     (ObjKind::Logic, 1, false)
                 } else {
@@ -280,7 +291,18 @@ fn vpi_type_name(t: i32) -> String {
 /// Relationship types tried, in order, when enumerating a scope's children.
 /// Mirrors cocotb's `VpiIterator` tables minus the entries it disables.
 const MODULE_CHILDREN: &[i32] = &[
-    vpiNet, vpiNetArray, vpiReg, vpiRegArray, vpiMemory, vpiIntegerVar, vpiRealVar, vpiVariables, vpiParameter, vpiNamedEvent, vpiInternalScope, vpiModule,
+    vpiNet,
+    vpiNetArray,
+    vpiReg,
+    vpiRegArray,
+    vpiMemory,
+    vpiIntegerVar,
+    vpiRealVar,
+    vpiVariables,
+    vpiParameter,
+    vpiNamedEvent,
+    vpiInternalScope,
+    vpiModule,
 ];
 
 impl Backend for VpiBackend {
@@ -535,7 +557,7 @@ impl Backend for VpiBackend {
             *out = self.read_binstr(raw)?;
             return Ok(());
         }
-        let words = ((width as usize) + 31) / 32;
+        let words = (width as usize).div_ceil(32);
         let mut v = s_vpi_value::new(vpiVectorVal);
         unsafe {
             vpi_get_value(raw, &mut v);
@@ -582,7 +604,7 @@ impl Backend for VpiBackend {
         let cstring;
         let mut val = match v {
             Value::Vec(x) => {
-                let words = ((x.width() as usize) + 31) / 32;
+                let words = (x.width() as usize).div_ceil(32);
                 self.vec_buf.clear();
                 self.vec_buf.extend((0..words).map(|i| s_vpi_vecval { aval: x.aval()[i], bval: x.bval()[i] }));
                 if self.vec_buf.is_empty() {
@@ -643,9 +665,24 @@ impl Backend for VpiBackend {
                 s_vpi_time { type_: vpiSimTime, high: (steps >> 32) as u32, low: steps as u32, real: 0.0 },
                 s_vpi_value::new(vpiSuppressVal),
             ),
-            CbKind::ReadWrite => (cbReadWriteSynch, std::ptr::null_mut(), s_vpi_time { type_: vpiSimTime, high: 0, low: 0, real: 0.0 }, s_vpi_value::new(vpiSuppressVal)),
-            CbKind::ReadOnly => (cbReadOnlySynch, std::ptr::null_mut(), s_vpi_time { type_: vpiSimTime, high: 0, low: 0, real: 0.0 }, s_vpi_value::new(vpiSuppressVal)),
-            CbKind::NextTimeStep => (cbNextSimTime, std::ptr::null_mut(), s_vpi_time { type_: vpiSimTime, high: 0, low: 0, real: 0.0 }, s_vpi_value::new(vpiSuppressVal)),
+            CbKind::ReadWrite => (
+                cbReadWriteSynch,
+                std::ptr::null_mut(),
+                s_vpi_time { type_: vpiSimTime, high: 0, low: 0, real: 0.0 },
+                s_vpi_value::new(vpiSuppressVal),
+            ),
+            CbKind::ReadOnly => (
+                cbReadOnlySynch,
+                std::ptr::null_mut(),
+                s_vpi_time { type_: vpiSimTime, high: 0, low: 0, real: 0.0 },
+                s_vpi_value::new(vpiSuppressVal),
+            ),
+            CbKind::NextTimeStep => (
+                cbNextSimTime,
+                std::ptr::null_mut(),
+                s_vpi_time { type_: vpiSimTime, high: 0, low: 0, real: 0.0 },
+                s_vpi_value::new(vpiSuppressVal),
+            ),
         };
         register_raw(id, kind, reason, obj, time, value)
     }
@@ -674,7 +711,12 @@ impl Backend for VpiBackend {
 
     fn argv(&self) -> Vec<String> {
         unsafe {
-            let mut info = s_vpi_vlog_info { argc: 0, argv: std::ptr::null_mut(), product: std::ptr::null_mut(), version: std::ptr::null_mut() };
+            let mut info = s_vpi_vlog_info {
+                argc: 0,
+                argv: std::ptr::null_mut(),
+                product: std::ptr::null_mut(),
+                version: std::ptr::null_mut(),
+            };
             if vpi_get_vlog_info(&mut info) == 0 || info.argv.is_null() {
                 return Vec::new();
             }
@@ -684,7 +726,14 @@ impl Backend for VpiBackend {
 }
 
 /// Register a callback record with the simulator.
-fn register_raw(id: CbId, kind: CbKind, reason: i32, obj: vpiHandle, time: s_vpi_time, value: s_vpi_value) -> Result<CbId> {
+fn register_raw(
+    id: CbId,
+    kind: CbKind,
+    reason: i32,
+    obj: vpiHandle,
+    time: s_vpi_time,
+    value: s_vpi_value,
+) -> Result<CbId> {
     let mut rec = Box::new(CbRec {
         id,
         kind,
@@ -801,10 +850,17 @@ unsafe extern "C" fn rivet_end_of_sim(_cb: *mut s_cb_data) -> i32 {
 /// simulation. Called from `vlog_startup_routines`, or directly by an
 /// embedding `main` (Verilator).
 pub fn startup() {
+    startup_with(|b| Box::new(b));
+}
+
+/// Like [`startup`], but lets the caller wrap the [`VpiBackend`] (the
+/// Verilator backend delegates hierarchy and values to it and schedules
+/// timers natively).
+pub fn startup_with(wrap: impl FnOnce(VpiBackend) -> Box<dyn Backend>) {
     rivet_core::log::init();
     let backend = VpiBackend::new();
     log::debug!("rivet VPI backend on {} ({:?})", backend.version(), backend.sim());
-    runtime::init(Box::new(backend));
+    runtime::init(wrap(backend));
     rivet_core::test::install_default_entry();
     unsafe {
         static mut START: s_cb_data = s_cb_data {
@@ -852,6 +908,10 @@ pub static vlog_startup_routines: [Option<unsafe extern "C" fn()>; 2] = [Some(ri
 
 /// For simulators that need an explicit bootstrap symbol (Xcelium, CVC) and
 /// for Verilator's `main`.
+///
+/// # Safety
+/// Must be called from the simulator's thread, once, before any other
+/// Rivet API.
 #[no_mangle]
 pub unsafe extern "C" fn vlog_startup_routines_bootstrap() {
     for r in vlog_startup_routines.iter().flatten() {

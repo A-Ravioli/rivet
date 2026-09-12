@@ -12,3 +12,5 @@ Read in order.
    test layer, the kit library, performance targets, risks.
 3. [`02-roadmap.md`](02-roadmap.md): crate layout and milestones M0 through M7
    with exit criteria.
+4. [`03-status.md`](03-status.md): what is implemented, verified, and still
+   open, against the roadmap.

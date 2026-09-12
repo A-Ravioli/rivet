@@ -206,7 +206,12 @@ extern "C" {
     pub fn vpi_get(property: PLI_INT32, object: vpiHandle) -> PLI_INT32;
     pub fn vpi_get_str(property: PLI_INT32, object: vpiHandle) -> *mut PLI_BYTE8;
     pub fn vpi_get_value(expr: vpiHandle, value_p: *mut s_vpi_value);
-    pub fn vpi_put_value(object: vpiHandle, value_p: *mut s_vpi_value, time_p: *mut s_vpi_time, flags: PLI_INT32) -> vpiHandle;
+    pub fn vpi_put_value(
+        object: vpiHandle,
+        value_p: *mut s_vpi_value,
+        time_p: *mut s_vpi_time,
+        flags: PLI_INT32,
+    ) -> vpiHandle;
     pub fn vpi_get_time(object: vpiHandle, time_p: *mut s_vpi_time);
     pub fn vpi_free_object(object: vpiHandle) -> PLI_INT32;
     pub fn vpi_chk_error(error_info_p: *mut s_vpi_error_info) -> PLI_INT32;
@@ -215,6 +220,9 @@ extern "C" {
 }
 
 /// Convert a simulator-owned C string to an owned `String` (empty if NULL).
+///
+/// # Safety
+/// `p` must be NULL or point to a NUL-terminated string.
 pub unsafe fn cstr(p: *const c_char) -> String {
     if p.is_null() {
         String::new()

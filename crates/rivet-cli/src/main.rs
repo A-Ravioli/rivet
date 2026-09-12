@@ -135,12 +135,16 @@ fn cargo_metadata(dir: &Path, package: Option<&str>) -> Result<Package, String> 
     let mut lib_name = name.replace('-', "_");
     let mut verilator_bin = None;
     for t in pkg["targets"].as_array().cloned().unwrap_or_default() {
-        let kinds: Vec<&str> = t["kind"].as_array().map(|k| k.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+        let kinds: Vec<&str> =
+            t["kind"].as_array().map(|k| k.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
         if kinds.contains(&"cdylib") {
             lib_name = t["name"].as_str().unwrap_or(&lib_name).replace('-', "_");
         }
         if kinds.contains(&"bin") {
-            let rf: Vec<&str> = t["required-features"].as_array().map(|k| k.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+            let rf: Vec<&str> = t["required-features"]
+                .as_array()
+                .map(|k| k.iter().filter_map(|x| x.as_str()).collect())
+                .unwrap_or_default();
             if rf.contains(&"verilator") || verilator_bin.is_none() {
                 verilator_bin = Some(t["name"].as_str().unwrap().to_string());
             }
@@ -340,7 +344,9 @@ fn run(opts: &Opts) -> Result<ExitCode, String> {
             eprintln!("rivet: {tests} tests, {failures} failed, {skipped} skipped ({})", results.display());
             Ok(if failures > 0 { ExitCode::from(1) } else { ExitCode::SUCCESS })
         }
-        None => Err(format!("simulator produced no {}; it probably died before the harness finished", results.display())),
+        None => {
+            Err(format!("simulator produced no {}; it probably died before the harness finished", results.display()))
+        }
     }
 }
 
