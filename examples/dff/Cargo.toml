@@ -7,9 +7,17 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "dff_verilator"
+path = "src/main.rs"
+required-features = ["verilator"]
+
 [dependencies]
 rivet = { workspace = true }
 log = { workspace = true }
+
+[build-dependencies]
+rivet-verilator = { workspace = true }
 
 [features]
 verilator = ["rivet/verilator"]

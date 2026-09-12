@@ -50,7 +50,9 @@ pub struct TestResult {
 /// All tests visible to this binary, in execution order.
 pub fn all_tests() -> Vec<&'static TestDesc> {
     let mut v: Vec<&TestDesc> = inventory::iter::<TestDesc>.into_iter().collect();
-    v.sort_by_key(|t| t.stage);
+    // Link order is not deterministic across builds; sort by stage, then
+    // module and name, so runs on different simulators agree.
+    v.sort_by(|a, b| a.stage.cmp(&b.stage).then_with(|| a.module.cmp(b.module)).then_with(|| a.name.cmp(b.name)));
     v
 }
 

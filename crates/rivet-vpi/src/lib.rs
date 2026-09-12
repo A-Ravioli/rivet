@@ -774,10 +774,21 @@ unsafe extern "C" fn rivet_start_of_sim(_cb: *mut s_cb_data) -> i32 {
     0
 }
 
+static EXIT_CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Exit code decided by the regression, available after end of simulation.
+pub fn exit_code() -> i32 {
+    EXIT_CODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 unsafe extern "C" fn rivet_end_of_sim(_cb: *mut s_cb_data) -> i32 {
     let _ = catch_unwind(|| {
+        if !runtime::is_initialised() {
+            return;
+        }
         runtime::dispatch(Event::EndOfSim);
         let code = runtime::exit_code();
+        EXIT_CODE.store(code, std::sync::atomic::Ordering::Relaxed);
         if code != 0 {
             eprintln!("rivet: simulation finished with failures (exit code {code})");
         }

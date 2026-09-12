@@ -19,4 +19,19 @@ module dff #(parameter int WIDTH = 8) (
 
     logic [WIDTH:0] sum;
     assign sum = d + q;
+
+    // Unpacked array written by the testbench and read back through mem_out.
+    logic [WIDTH-1:0] mem [0:3];
+    logic [WIDTH-1:0] mem_out;
+    assign mem_out = mem[d[1:0]];
+    integer           cycles;
+    real              ratio;
+    initial begin
+        cycles = 0;
+        ratio = 0.0;
+    end
+    always_ff @(posedge clk) begin
+        cycles <= cycles + 1;
+        ratio  <= ratio + 0.5;
+    end
 endmodule

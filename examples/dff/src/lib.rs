@@ -69,7 +69,7 @@ async fn parameters_and_hierarchy(dut: Module) -> rivet::Result<()> {
     Ok(())
 }
 
-#[rivet::test]
+#[rivet::test(stage = -1)]
 async fn x_propagates_before_reset(dut: Module) -> rivet::Result<()> {
     let q = dut.signal("q")?;
     let v = q.get();
@@ -127,4 +127,47 @@ async fn times_out(dut: Module) -> rivet::Result<()> {
     loop {
         clk.rising_edge().await;
     }
+}
+
+#[rivet::test]
+async fn arrays_integers_reals(dut: Module) -> rivet::Result<()> {
+    let clk = dut.signal("clk")?;
+    let _clock = Clock::start(clk, 10.ns());
+    let mem = dut.signal("mem")?;
+    ensure!(mem.kind() == rivet::ObjKind::Array, "mem should be an unpacked array, got {:?}", mem.kind());
+    assert_eq!(mem.width(), 4, "array element count");
+    for i in 0..4 {
+        mem.index(i)?.set(0x10 + i as u64);
+    }
+    clk.rising_edge().await;
+    read_only().await;
+    for i in 0..4 {
+        assert_eq!(mem.index(i)?.get_u64()?, 0x10 + i as u64, "mem[{i}]");
+        assert_eq!(mem.index(i)?.width(), 8);
+    }
+    let cycles = dut.signal("cycles")?;
+    // Icarus reports `integer` as vpiIntegerVar; Verilator as a 32-bit vpiReg.
+    ensure!(
+        cycles.kind() == rivet::ObjKind::Integer || (cycles.kind() == rivet::ObjKind::LogicVec && cycles.width() == 32),
+        "cycles should be an integer, got {:?}/{}",
+        cycles.kind(),
+        cycles.width()
+    );
+    let c0 = cycles.get_i64()?;
+    clk.rising_edge().await;
+    clk.rising_edge().await;
+    read_only().await;
+    assert_eq!(cycles.get_i64()?, c0 + 2);
+    let ratio = dut.signal("ratio")?;
+    ensure!(ratio.kind() == rivet::ObjKind::Real, "ratio should be real, got {:?}", ratio.kind());
+    let r0 = ratio.get_real();
+    clk.rising_edge().await;
+    read_only().await;
+    assert!((ratio.get_real() - (r0 + 0.5)).abs() < 1e-9);
+    // Leave the ReadOnly phase before writing again.
+    clk.falling_edge().await;
+    ratio.set_real(42.25);
+    read_only().await;
+    assert!((ratio.get_real() - 42.25).abs() < 1e-9, "real write, got {}", ratio.get_real());
+    Ok(())
 }
