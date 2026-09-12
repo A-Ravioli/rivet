@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edalize-rivet"
+version = "0.1.0"
+description = "Edalize tool backend that runs Rivet (Rust) testbenches; makes `fusesoc run --tool rivet` work"
+requires-python = ">=3.8"
+dependencies = ["edalize>=0.5"]
+
+[project.entry-points."edalize.legacy_tool"]
+rivet = "edalize_rivet:Rivet"
+
+[tool.setuptools]
+packages = ["edalize_rivet"]
+
+[tool.setuptools.package-data]
+edalize_rivet = ["templates/*"]

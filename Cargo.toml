@@ -17,6 +17,8 @@ members = [
     "examples/conformance",
     "examples/bus",
 ]
+# Built separately with maturin (needs a Python interpreter).
+exclude = ["python/rivet_py"]
 
 [workspace.package]
 version = "0.1.0"

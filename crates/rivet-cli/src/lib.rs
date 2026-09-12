@@ -56,6 +56,8 @@ pub struct Opts {
     /// bindgen: write the hierarchy here instead of running tests.
     pub dump: Option<PathBuf>,
     pub out: Option<PathBuf>,
+    /// An explicit `rivet.toml` (default: found next to or above the crate).
+    pub manifest: Option<PathBuf>,
 }
 
 impl Opts {
@@ -86,6 +88,7 @@ impl Opts {
             update_golden: false,
             dump: None,
             out: None,
+            manifest: std::env::var("RIVET_MANIFEST").ok().filter(|s| !s.is_empty()).map(PathBuf::from),
         }
     }
 }
@@ -112,6 +115,7 @@ pub fn usage() -> ! {
          \x20 --no-log-dir               no per-test log files\n\
          \x20 --cov-threshold <pct>      fail the run below this functional coverage\n\
          \x20 --update-golden            rewrite golden trace files from this run\n\
+         \x20 --manifest <rivet.toml>    design description (default: next to or above the crate)\n\
          \x20 -o <file>                  bindgen: output file (default src/dut.rs)\n\
          \x20 -v                         verbose\n\
          \n\
@@ -159,6 +163,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
             "--cov-threshold" | "--threshold" => o.cov_threshold = Some(num(it.next(), "--cov-threshold")),
             "--update-golden" => o.update_golden = true,
             "-o" | "--out" => o.out = it.next().map(PathBuf::from),
+            "--manifest" => o.manifest = it.next().map(PathBuf::from),
             "-v" | "--verbose" => o.verbose = true,
             "-h" | "--help" => usage(),
             "--" => {
@@ -244,6 +249,13 @@ fn cargo_metadata(dir: &Path, package: Option<&str>) -> Result<Package, String> 
         }
     }
     Ok(Package { name, lib_name, manifest_dir, target_dir, verilator_bin })
+}
+
+fn load_manifest(pkg: &Package, opts: &Opts) -> Result<Manifest, String> {
+    match &opts.manifest {
+        Some(p) => Manifest::load(p),
+        None => Manifest::find(&pkg.manifest_dir),
+    }
 }
 
 fn run_cmd(mut cmd: Command, verbose: bool) -> Result<(), String> {
@@ -375,6 +387,9 @@ fn cargo_build(pkg: &Package, opts: &Opts, verilator: bool, set: Option<&str>) -
         cmd.args(["--features", "verilator", "--bin", bin]);
         // The Verilator model is parameterised at build time.
         cmd.env("RIVET_PARAM_SET", set.unwrap_or(""));
+        if let Some(m) = &opts.manifest {
+            cmd.env("RIVET_MANIFEST", std::fs::canonicalize(m).unwrap_or_else(|_| m.clone()));
+        }
     } else {
         cmd.arg("--lib");
     }
@@ -674,7 +689,7 @@ fn run_set(
 /// Run `build`, `run`, or a `bindgen` dump according to `opts`.
 pub fn run(opts: &Opts) -> Result<ExitCode, String> {
     let pkg = cargo_metadata(&opts.dir, opts.package.as_deref())?;
-    let m = Manifest::find(&pkg.manifest_dir)?;
+    let m = load_manifest(&pkg, opts)?;
     let base_dir = pkg.manifest_dir.join("sim_build").join(&opts.sim);
     std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
     let build_only = opts.cmd == "build";
@@ -825,7 +840,7 @@ pub fn cov_report(opts: &Opts) -> Result<ExitCode, String> {
 /// or the design.
 pub fn watch(opts: &Opts) -> Result<ExitCode, String> {
     let pkg = cargo_metadata(&opts.dir, opts.package.as_deref())?;
-    let m = Manifest::find(&pkg.manifest_dir)?;
+    let m = load_manifest(&pkg, opts)?;
     let mut roots: Vec<PathBuf> = vec![
         pkg.manifest_dir.join("src"),
         pkg.manifest_dir.join("tests"),

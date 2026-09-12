@@ -234,26 +234,28 @@ whatever the licence takes.
 
 ## 7. Kit and API completeness
 
-- Per-test seeded RNG: `RIVET_SEED` is passed by the CLI but nothing
-  consumes it. Add `rivet::rng()` returning a ChaCha8 generator seeded
-  from `(seed, test name)`, reset per test, with the seed printed in the
-  summary and written to `results.xml` as cocotb does.
-- Bus models: AXI4-Lite master and slave, AXI-Stream source and sink, APB,
-  and a byte-addressable memory model with optional latency and
-  backpressure, all on the existing `Driver`/`Monitor` traits.
+Done since this plan was written: per-test seeded RNG and `Randomize`,
+bus models (AXI4-Lite, AXI4, AXI4-Stream, APB, Avalon-MM, Wishbone) with
+memory-backed slaves and backpressure, the `Memory` model, wall-clock
+timeouts with a watchdog, functional coverage, golden traces, checkers,
+sharded runs, parameter sets, typed enums and packed structs in `bindgen`.
+
+Still open:
+
 - Struct members: `Object::children` uses module relationships; struct
   variables need `vpiMember` iteration, and `bindgen` should emit nested
-  structs for them.
+  views for them (today packed structs are decoded from the vector).
 - Multi-dimensional unpacked arrays in `bindgen` (today only one
   dimension).
 - `results.xml` `file`/`line` attributes from `file!()`/`line!()` in the
   macro.
-- A wall-clock timeout in the CLI (`--timeout`) for hung simulations;
-  today only simulated-time timeouts exist.
 - Better phase errors: writing in ReadOnly should say "await
   `next_time_step()` or an edge first" rather than only naming the phase.
 - `cargo nextest` compatibility check (needs `--list --format terse` and
   per-test process isolation semantics; may need a `nextest.toml`).
+- Edalize flow API (`edalize.tools`) alongside the legacy tool backend.
+- Constrained random beyond rejection sampling (a small solver for linear
+  constraints) and coverage-driven stimulus.
 
 ## 8. Platforms
 

@@ -4,32 +4,47 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 
 | Milestone | Status | Notes |
 |---|---|---|
-| M0 executor + mock simulator | done | `rivet-core`, `rivet-mock`; 13 timing-model/executor tests plus value/time unit tests, no simulator needed |
-| M1 Verilator | done | `rivet-verilator`: build helper, generated shim, Rust main loop, native timer wheel and phase scheduling, direct signal access; VCD/FST tracing; verified on 5.020 and 5.036 |
-| M2 Icarus / general VPI | done | `rivet-vpi`: `vpiVectorVal` values, persistent value-change callbacks, callback re-entrancy handled in the runtime, `vlog_startup_routines` export; other VPI simulators carry cocotb's quirks in code but are unverified |
-| M3 `cargo test` harness and CLI | done | `rivet` CLI (`run`, `build`, `bindgen`, `clean`, `--filter`, `--waves`, `--release`, `--seed`, `--log`), `rivet.toml`, `#[rivet::test]` with `timeout`/`skip`/`expect_fail`/`stage`, JUnit `results.xml`; `rivet::harness::main()` makes `cargo test -p <crate>` run the simulation (`RIVET_SIM` selects the simulator) with `--list`, filters, `--exact`, `--skip`, and libtest-style output. `cargo nextest` is untested |
-| M4 VHDL | partial | VHDL designs run on GHDL through its VPI (`examples/dff_vhdl`, values as binary strings since GHDL has no `vpiVectorVal`); generics are not reachable by name on GHDL; a VHPI backend (NVC, Riviera, Xcelium VHDL, Questa) is not started |
-| M5 typed bindings, Verilator direct access | partial | `rivet bindgen --sim <sim>` runs the design once, dumps the hierarchy as JSON, and generates a typed module (`examples/dff/src/dut.rs`); tests take `dut: Dut` via the `Bind` trait; widths are checked at bind time; constants inside generate blocks are left out so bindings stay portable across simulators. Verilator direct signal access is done: values go straight to the model's storage through `VerilatedScope::varFind`, VPI is used only for value-change callbacks |
-| M6 kit | partial | `Clock`, `Event`, `Queue`, `Lock`, `first`/`join`/`with_timeout`, `Scope`; `rivet-kit` has `reset`, `Driver`/`Monitor`, a valid/ready source and sink, and an in-order `Scoreboard` (`examples/fifo`); no AXI or memory models yet |
+| M0 executor + mock simulator | done | `rivet-core`, `rivet-mock`; timing-model, executor, runner and kit suites run without a simulator |
+| M1 Verilator | done | `rivet-verilator`: build helper (per-parameter-set object directories), generated shim, Rust main loop, native timer wheel and phase scheduling, direct signal access; VCD/FST tracing with per-test files; verified on 5.020 and 5.036 |
+| M2 Icarus / general VPI | done | `rivet-vpi`: `vpiVectorVal` values, persistent value-change callbacks, callback re-entrancy handled in the runtime, `vlog_startup_routines` export, `$dumpon`/`$dumpoff` control; other VPI simulators carry cocotb's quirks in code but are unverified |
+| M3 `cargo test` harness and CLI | done | `rivet run|build|watch|bindgen|cov|clean`; `-j N` shards, `--param-set`, `--seed`, `--wall-timeout`, `--waves[-per-test]`, `--log-format json`, per-test log files, `--cov-threshold`, `--update-golden`, `--manifest`; `cargo-rivet`; `#[rivet::test]` with `timeout`/`wall_timeout`/`skip`/`expect_fail`/`stage`/`params`/`param_sets`; JUnit `results.xml` plus `results.json`; `rivet::harness::main()` for `cargo test` with `--test-threads` |
+| M4 VHDL | partial | VHDL designs run on GHDL through its VPI (`examples/dff_vhdl`); generics are not reachable by name on GHDL; no VHPI backend yet |
+| M5 typed bindings, Verilator direct access | done | `rivet bindgen` generates a module per instance, `Vec<Signal>` for arrays, Rust enums and bit-layout structs for `typedef enum` / `typedef struct packed` found in the sources, and `Dut::hierarchy()`; Verilator direct access through `VerilatedScope::varFind` |
+| M6 kit | done | `Clock` (phase, jitter), `Reset` builder, `Event`/`Queue`/`Lock`, `Scope`; `rivet-kit`: `Driver`/`Monitor`, valid/ready, `Scoreboard`, `Model`/`ModelScoreboard`, `Memory` with `$readmemh`, AXI4-Lite/AXI4/AXI4-Stream/APB/Avalon-MM/Wishbone masters and memory-backed slaves with backpressure, checkers (`assert_*`, X detection), golden `Trace`s |
 | M7 commercial simulators | code only | Xcelium startup, Questa string-write, Verilator recurring-callback quirks are implemented but have never run on those tools |
+
+Beyond the roadmap:
+
+- Seeded random stimulus: `rivet::rng()` per-test streams derived from the
+  run seed and the test name, `#[derive(Randomize)]` with ranges, weights
+  and rejection-sampled constraints; the seed is printed by every run and
+  recorded per test in `results.xml`.
+- Functional coverage: covergroups, points with named/auto/split bins,
+  ignore and illegal ranges, crosses; `coverage.json` per run merged across
+  shards and parameter sets; `rivet cov report` and thresholds.
+- Hang diagnostics: every task's pending trigger is known; timeouts print
+  the task list; per-test wall-clock limits with an in-band failure and a
+  watchdog abort.
+- Integrations: an Edalize tool backend (`fusesoc run --tool rivet`) and
+  `rivet_py`, the simulator-independent kit for cocotb testbenches.
+  [`../migration.md`](../migration.md) maps cocotb onto Rivet.
 
 ## Verified end to end
 
-- `examples/dff`: 10 tests on Icarus Verilog 12.0 and Verilator 5.020, covering
-  generated typed bindings, generate blocks,
-  edges, ReadWrite/ReadOnly, deposits, X before reset, parameters, hierarchy
-  enumeration, unpacked arrays, `integer`, `real`, timeouts, `expect_fail`,
-  concurrent tasks with a `Queue`.
+- `examples/dff`: 10 tests on Icarus Verilog 12.0 and Verilator 5.020/5.036.
 - `examples/bench`: 7 benchmarks on both; numbers in
   [`../benchmarks.md`](../benchmarks.md).
-- `examples/fifo`: 3 kit-based tests (valid/ready source from a queue, sink
-  with random backpressure, scoreboard) on Icarus and Verilator, with
-  identical simulated end times on both.
+- `examples/fifo`: 3 kit-based tests on Icarus and Verilator.
 - `examples/dff_vhdl`: 2 tests on GHDL 4.1.
-- `examples/conformance`: 21 tests per simulator on Icarus, Verilator 5.020,
-  and Verilator 5.036, covering every backend feature; see
-  [`../testing.md`](../testing.md) for the coverage map and the defects the
-  suite found.
+- `examples/conformance`: 21 tests per simulator on Icarus, Verilator 5.020
+  and 5.036.
+- `examples/bus`: 13 tests, run under two parameter sets (25 results) on
+  Icarus, Verilator 5.020 and 5.036, serially and sharded, with golden
+  traces shared between simulators.
+- FuseSoC/Edalize and `rivet_py` flows on Icarus.
+
+See [`../testing.md`](../testing.md) for the coverage map and the defects
+the suites found.
 
 ## Behaviours pinned by tests against the mock
 
@@ -40,21 +55,27 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 - Cancelling a task drops its future and deregisters its trigger.
 - A panic in any task fails the current test.
 - FIFO task scheduling.
+- The same seed reproduces the same stimulus, clock jitter and bus wait
+  states, whatever ran before the test and however the run is sharded.
 
-The plan for everything below and for the unverified rows above is in
+The plan for everything still open is in
 [`04-remaining-work.md`](04-remaining-work.md).
 
 ## Known gaps and decisions
 
 - Deposits on Verilator (every version) are buffered by the runtime until
   ReadWrite and applied as immediate writes; Rivet does not use Verilator's
-  `vpiInertialDelay` machinery, which would need `doInertialPuts` calls in
-  the loop. Verified identical behaviour on 5.020 and 5.036.
+  `vpiInertialDelay` machinery. Verified identical behaviour on 5.020 and
+  5.036.
 - Force/Release are reported unsupported on Verilator (`Capabilities`).
-- `Signal::index` and `member` work for unpacked arrays and struct members
-  the simulator exposes through `vpi_handle_by_index`/`by_name`; generate
-  arrays use cocotb's pseudo-region fallback (`dut.path_signal("gen[1].tap")`,
-  `dut.module("gen")?.index(1)`), tested on Icarus and Verilator.
+- Generate arrays use cocotb's pseudo-region fallback
+  (`dut.path_signal("gen[1].tap")`), tested on Icarus and Verilator.
+- Sharded runs (`-j`) assume tests are independent: `stage` ordering does
+  not hold across shards, and a test that leaves the design in a state the
+  next test relies on must not be sharded.
+- Golden traces are per parameter set and use time stamps relative to the
+  trace's creation; a design whose timing differs between simulators needs
+  per-simulator goldens (not supported; use `Trace::unstamped`).
 - The test crate must be linked into the Verilator binary
   (`use example_dff as _;` in `main.rs`) for `inventory` registrations to be
   present.

@@ -11,7 +11,28 @@ interpreter and string-typed values with an in-process native executor and
 
 Status: Icarus Verilog, Verilator, and GHDL (VHDL) work end to end; see
 [`docs/design/03-status.md`](docs/design/03-status.md). Design documents are in
-[`docs/design/`](docs/design/README.md).
+[`docs/design/`](docs/design/README.md); coming from cocotb, start with
+[`docs/migration.md`](docs/migration.md).
+
+What it does beyond cocotb:
+
+- Seeded random stimulus (`rivet::rng()`, `#[derive(Randomize)]` with
+  constraints); every run prints its seed and `--seed` replays it.
+- Functional coverage (`Covergroup`, `Bins`, crosses), merged across runs,
+  `rivet cov report --threshold 90`.
+- Bus models: AXI4-Lite, AXI4, AXI4-Stream, APB, Avalon-MM, Wishbone
+  masters and memory-backed slaves with backpressure; a sparse `Memory`
+  with `$readmemh` loading; reference models feeding a scoreboard.
+- Checkers (`assert_never`, `assert_implies`, `assert_no_x`, ...), golden
+  transaction traces (`assert_trace!`), hang diagnostics that list every
+  task and its trigger, per-test wall-clock limits.
+- `rivet run -j 8` shards tests across simulator processes; `rivet watch`
+  reruns on change; `[design.param_sets]` rebuilds the design per
+  parameterisation; `#[rivet::test(params = [8, 16])]`.
+- `rivet bindgen` turns `typedef enum` and `typedef struct packed` into
+  Rust types; per-test log files and JSON logs; per-test waveform files.
+- `fusesoc run --tool rivet` through the Edalize backend in
+  `integrations/edalize`; `python/rivet_py` brings the kit to cocotb.
 
 ## A testbench
 
@@ -46,6 +67,9 @@ target/debug/rivet run --sim icarus    -C examples/dff
 target/debug/rivet run --sim verilator -C examples/dff
 target/debug/rivet run --sim ghdl      -C examples/dff_vhdl
 target/debug/rivet run --sim icarus -C examples/dff --filter counter --waves --log debug
+target/debug/rivet run --sim icarus -C examples/bus -j 4 --cov-threshold 95 --seed 42
+target/debug/rivet watch --sim verilator -C examples/bus
+target/debug/rivet cov report -C examples/bus --threshold 100
 ```
 
 `rivet run` builds the crate, compiles the design described in `rivet.toml`,
@@ -68,7 +92,9 @@ target/debug/rivet bindgen --sim icarus -C examples/dff   # writes src/dut.rs
 ```
 
 generates a struct per module with a field per signal, so a misspelled
-signal is a compile error and a width change is caught when the test binds:
+signal is a compile error and a width change is caught when the test binds.
+`typedef enum` and `typedef struct packed` declarations in the sources
+become Rust enums and structs with `from_signal` and `set_on`:
 
 ```rust
 mod dut;
@@ -94,10 +120,12 @@ async fn typed(dut: Dut) -> rivet::Result<()> {
 | `rivet-vpi` | VPI backend (Icarus, Verilator's VPI, and the cocotb-catalogued quirks for others) |
 | `rivet-verilator` | Verilator build helper, C++ shim, simulation main loop |
 | `rivet-macros` | `#[rivet::test]` |
-| `rivet-kit` | `reset`, `Driver`/`Monitor`, valid/ready handshake, `Scoreboard` |
+| `rivet-kit` | `Reset`, `Driver`/`Monitor`, bus models, `Memory`, `Scoreboard`, `ModelScoreboard`, checkers, `Trace` |
 | `rivet-manifest` | `rivet.toml` |
 | `rivet-cli` | the `rivet` command |
 | `rivet` | facade crate |
+| `integrations/edalize` | Edalize tool backend (`fusesoc run --tool rivet`) |
+| `python/rivet_py` | Python bindings to the kit for cocotb testbenches |
 
 ## Requirements
 

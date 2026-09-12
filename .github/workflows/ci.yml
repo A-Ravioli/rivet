@@ -56,6 +56,37 @@ jobs:
           target/debug/rivet run --sim icarus -C examples/bench
           target/debug/rivet run --sim verilator -C examples/bench
 
+  python-integrations:
+    # The Edalize/FuseSoC backend and the rivet_py shim for cocotb.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install simulators and Python packages
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog
+          pip install maturin fusesoc edalize cocotb
+          pip install -e integrations/edalize
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: FuseSoC runs the dff example through the rivet Edalize backend
+        env:
+          RIVET_BIN: ${{ github.workspace }}/target/debug/rivet
+        run: |
+          mkdir -p /tmp/fusesoc && cd /tmp/fusesoc
+          fusesoc --cores-root ${{ github.workspace }}/examples/dff run --no-export --target sim --tool rivet rivet:examples:dff
+      - name: rivet_py wheel, unit tests, and a cocotb test using it
+        run: |
+          cd python/rivet_py
+          cargo clippy --release -- -D warnings
+          maturin build --release -o dist
+          pip install dist/*.whl
+          cd tests && python -m unittest -v test_shim
+          cd cocotb_dff && python run.py
+
   verilator-5036:
     # Verilator 5.036 is the oldest version cocotb 2.x supports and renamed
     # symbol-table accessors; the harness must work there too. Built from

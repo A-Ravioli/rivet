@@ -56,8 +56,19 @@ impl Build {
     /// (or an ancestor), including the `[sim.verilator]` section.
     pub fn from_manifest() -> Build {
         let dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-        let m = rivet_manifest::Manifest::find(&dir).unwrap_or_else(|e| panic!("{e}"));
-        println!("cargo:rerun-if-changed={}", m.dir.join("rivet.toml").display());
+        // `rivet run --manifest` (and Edalize) name the manifest explicitly.
+        println!("cargo:rerun-if-env-changed=RIVET_MANIFEST");
+        let m = match std::env::var("RIVET_MANIFEST").ok().filter(|s| !s.is_empty()) {
+            Some(p) => {
+                println!("cargo:rerun-if-changed={p}");
+                rivet_manifest::Manifest::load(Path::new(&p)).unwrap_or_else(|e| panic!("{e}"))
+            }
+            None => {
+                let m = rivet_manifest::Manifest::find(&dir).unwrap_or_else(|e| panic!("{e}"));
+                println!("cargo:rerun-if-changed={}", m.dir.join("rivet.toml").display());
+                m
+            }
+        };
         // `rivet run` selects a parameter set per build; a change rebuilds.
         println!("cargo:rerun-if-env-changed=RIVET_PARAM_SET");
         let set = std::env::var("RIVET_PARAM_SET").ok().filter(|s| !s.is_empty());
@@ -169,7 +180,9 @@ impl Build {
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
-        let stamp = out_dir.join("verilator.version");
+        // The stamp lives inside the object directory so that each
+        // parameter set tracks its own tool version.
+        let stamp = obj_dir.join("verilator.version");
         if std::fs::read_to_string(&stamp).ok().as_deref() != Some(version.as_str()) {
             let _ = std::fs::remove_dir_all(&obj_dir);
         }
