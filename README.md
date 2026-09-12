@@ -1,2 +1,2 @@
-# rubylith.rs
-faster cocotb
+# rivet
+faster cocotb/native hardware verification in Rust
