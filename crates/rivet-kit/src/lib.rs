@@ -6,14 +6,34 @@
 //!   driver and monitor.
 //! - [`Driver`] / [`Monitor`]: traits for user components, with helpers to
 //!   run them as tasks fed by a [`Queue`].
+//! - [`Memory`]: sparse byte memory with `$readmemh` loading.
+//! - [`bus`]: AXI4-Lite, AXI4, AXI4-Stream, APB, Avalon-MM and Wishbone
+//!   masters, memory-backed slaves and streams.
+//! - [`Reset`]: synchronous and asynchronous reset sequences.
+//! - [`Model`] / [`ModelScoreboard`]: reference models feeding a scoreboard.
+//! - [`check`]: assertion-style checkers (`assert_stable`, `assert_never`,
+//!   `assert_implies`, `assert_no_x`, ...).
+//! - [`Trace`]: transaction traces compared with golden files.
 
+pub mod bus;
+pub mod check;
 pub mod handshake;
+pub mod memory;
+pub mod model;
 pub mod reset;
 pub mod scoreboard;
+pub mod trace;
 
+pub use bus::Backpressure;
+pub use check::{
+    assert_always, assert_becomes, assert_implies, assert_never, assert_no_x, assert_stable, assert_within,
+};
 pub use handshake::{ValidReadySink, ValidReadySource};
+pub use memory::{load_hex_into, Memory};
+pub use model::{Model, ModelScoreboard};
 pub use reset::Reset;
 pub use scoreboard::Scoreboard;
+pub use trace::Trace;
 
 use rivet_core::handle::Signal;
 use rivet_core::sync::Queue;

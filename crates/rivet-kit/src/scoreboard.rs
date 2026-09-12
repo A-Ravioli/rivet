@@ -8,10 +8,15 @@ use std::rc::Rc;
 
 /// Compares observed items against expected items in order. Mismatches
 /// are logged and counted; [`Scoreboard::finish`] turns them into an error.
-#[derive(Clone)]
 pub struct Scoreboard<T> {
     inner: Rc<RefCell<Inner<T>>>,
     name: String,
+}
+
+impl<T> Clone for Scoreboard<T> {
+    fn clone(&self) -> Scoreboard<T> {
+        Scoreboard { inner: self.inner.clone(), name: self.name.clone() }
+    }
 }
 
 struct Inner<T> {
