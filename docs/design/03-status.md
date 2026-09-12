@@ -9,13 +9,14 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 | M2 Icarus / general VPI | done | `rivet-vpi`: `vpiVectorVal` values, persistent value-change callbacks, callback re-entrancy handled in the runtime, `vlog_startup_routines` export; other VPI simulators carry cocotb's quirks in code but are unverified |
 | M3 `cargo test` harness and CLI | partial | `rivet` CLI (`run`, `build`, `clean`, `--filter`, `--waves`, `--release`, `--seed`, `--log`), `rivet.toml`, `#[rivet::test]` with `timeout`/`skip`/`expect_fail`/`stage`, JUnit `results.xml`; not yet: a libtest-compatible `cargo test` harness, `--list`, JSON output |
 | M4 VHDL | partial | VHDL designs run on GHDL through its VPI (`examples/dff_vhdl`, values as binary strings since GHDL has no `vpiVectorVal`); generics are not reachable by name on GHDL; a VHPI backend (NVC, Riviera, Xcelium VHDL, Questa) is not started |
-| M5 typed bindings, Verilator direct access | not started | |
+| M5 typed bindings, Verilator direct access | partial | `rivet bindgen --sim <sim>` runs the design once, dumps the hierarchy as JSON, and generates a typed module (`examples/dff/src/dut.rs`); tests take `dut: Dut` via the `Bind` trait; widths are checked at bind time. Verilator direct signal access is not started |
 | M6 kit | partial | `Clock`, `Event`, `Queue`, `Lock`, `first`/`join`/`with_timeout`, `Scope`; `rivet-kit` has `reset`, `Driver`/`Monitor`, a valid/ready source and sink, and an in-order `Scoreboard` (`examples/fifo`); no AXI or memory models yet |
 | M7 commercial simulators | code only | Xcelium startup, Questa string-write, Verilator recurring-callback quirks are implemented but have never run on those tools |
 
 ## Verified end to end
 
-- `examples/dff`: 8 tests on Icarus Verilog 12.0 and Verilator 5.020, covering
+- `examples/dff`: 9 tests on Icarus Verilog 12.0 and Verilator 5.020, covering
+  generated typed bindings,
   edges, ReadWrite/ReadOnly, deposits, X before reset, parameters, hierarchy
   enumeration, unpacked arrays, `integer`, `real`, timeouts, `expect_fail`,
   concurrent tasks with a `Queue`.

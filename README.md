@@ -52,6 +52,30 @@ target/debug/rivet run --sim icarus -C examples/dff --filter counter --waves --l
 loads the harness into the simulator, and reads back a cocotb-compatible
 `results.xml` from `sim_build/<sim>/`.
 
+## Typed bindings
+
+```sh
+target/debug/rivet bindgen --sim icarus -C examples/dff   # writes src/dut.rs
+```
+
+generates a struct per module with a field per signal, so a misspelled
+signal is a compile error and a width change is caught when the test binds:
+
+```rust
+mod dut;
+use dut::Dut;
+
+#[rivet::test]
+async fn typed(dut: Dut) -> rivet::Result<()> {
+    let _clock = Clock::start(dut.clk, 10.ns());
+    dut.d.set(0x5a);
+    dut.clk.rising_edge().await;
+    read_only().await;
+    assert_eq!(dut.q.get_u64()?, 0x5a);
+    Ok(())
+}
+```
+
 ## Layout
 
 | Crate | Role |

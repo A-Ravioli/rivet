@@ -8,6 +8,8 @@
 //! rivet clean
 //! ```
 
+mod bindgen;
+
 use rivet_manifest::Manifest;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -26,6 +28,9 @@ struct Opts {
     verbose: bool,
     seed: Option<String>,
     log: Option<String>,
+    /// bindgen: write the hierarchy here instead of running tests.
+    dump: Option<PathBuf>,
+    out: Option<PathBuf>,
 }
 
 fn usage() -> ! {
@@ -41,7 +46,14 @@ fn usage() -> ! {
          \x20 --waves                    dump waveforms\n\
          \x20 --seed <n>                 random seed passed as RIVET_SEED\n\
          \x20 --log <level>              RIVET_LOG level (error|warn|info|debug|trace)\n\
-         \x20 -v                         verbose"
+         \x20 -o <file>                  bindgen: output file (default src/dut.rs)\n\
+         \x20 -v                         verbose\n\
+         \n\
+         commands:\n\
+         \x20 run       build everything and run the tests\n\
+         \x20 build     build without running\n\
+         \x20 bindgen   run the design once to dump its hierarchy, then write typed bindings\n\
+         \x20 clean     remove sim_build"
     );
     std::process::exit(2)
 }
@@ -59,6 +71,8 @@ fn parse_args() -> Opts {
         verbose: false,
         seed: None,
         log: None,
+        dump: None,
+        out: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -71,6 +85,7 @@ fn parse_args() -> Opts {
             "--waves" => o.waves = true,
             "--seed" => o.seed = it.next(),
             "--log" => o.log = it.next(),
+            "-o" | "--out" => o.out = it.next().map(PathBuf::from),
             "-v" | "--verbose" => o.verbose = true,
             "-h" | "--help" => usage(),
             "--" => {
@@ -313,6 +328,9 @@ fn common_env(cmd: &mut Command, opts: &Opts, m: &Manifest, results: &Path) {
     if opts.waves {
         cmd.env("RIVET_WAVES", "1");
     }
+    if let Some(d) = &opts.dump {
+        cmd.env("RIVET_DUMP_HIERARCHY", d);
+    }
 }
 
 fn run(opts: &Opts) -> Result<ExitCode, String> {
@@ -395,6 +413,15 @@ fn run(opts: &Opts) -> Result<ExitCode, String> {
         other => return Err(format!("unsupported simulator {other:?} (icarus, verilator, ghdl)")),
     }
 
+    if let Some(dump) = &opts.dump {
+        let json =
+            std::fs::read_to_string(dump).map_err(|e| format!("no hierarchy dump at {}: {e}", dump.display()))?;
+        let code = bindgen::generate(&json, None)?;
+        let out = opts.out.clone().unwrap_or_else(|| pkg.manifest_dir.join("src").join("dut.rs"));
+        std::fs::write(&out, code).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
+        eprintln!("rivet: wrote {}", out.display());
+        return Ok(ExitCode::SUCCESS);
+    }
     match results_summary(&results) {
         Some((tests, failures, skipped)) => {
             eprintln!("rivet: {tests} tests, {failures} failed, {skipped} skipped ({})", results.display());
@@ -408,8 +435,13 @@ fn run(opts: &Opts) -> Result<ExitCode, String> {
 
 fn main() -> ExitCode {
     let opts = parse_args();
+    let mut opts = opts;
     let r = match opts.cmd.as_str() {
         "run" | "build" => run(&opts),
+        "bindgen" => {
+            opts.dump = Some(opts.dir.join("sim_build").join(&opts.sim).join("hierarchy.json"));
+            run(&opts)
+        }
         "clean" => {
             let dir = opts.dir.join("sim_build");
             let _ = std::fs::remove_dir_all(&dir);

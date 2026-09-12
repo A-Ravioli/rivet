@@ -79,11 +79,19 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let skip = args.skip;
     let expect_fail = args.expect_fail;
     let stage = args.stage;
-    let takes_dut = !func.sig.inputs.is_empty();
-    let call = if takes_dut {
-        quote! { #name(dut) }
-    } else {
-        quote! { #name() }
+    // The dut parameter may be `Module` or any type implementing `rivet::Bind`.
+    let dut_ty = func.sig.inputs.first().and_then(|arg| match arg {
+        syn::FnArg::Typed(pt) => Some((*pt.ty).clone()),
+        _ => None,
+    });
+    let call = match &dut_ty {
+        Some(ty) => quote! {
+            async move {
+                let dut = <#ty as ::rivet::Bind>::bind(dut)?;
+                #name(dut).await
+            }
+        },
+        None => quote! { #name() },
     };
     let expanded = quote! {
         #func

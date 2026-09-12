@@ -267,6 +267,71 @@ fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
+/// Types a test can take as its `dut` argument: `Module`, or a generated
+/// typed hierarchy (`rivet bindgen`).
+pub trait Bind: Sized {
+    fn bind(root: Module) -> Result<Self>;
+}
+
+impl Bind for Module {
+    fn bind(root: Module) -> Result<Module> {
+        Ok(root)
+    }
+}
+
+/// Walk the design and write it as JSON (for `rivet bindgen`).
+pub fn dump_hierarchy(root: Module, path: &std::path::Path) -> std::io::Result<()> {
+    fn walk(obj: crate::handle::Object, out: &mut String, depth: usize) {
+        use std::fmt::Write as _;
+        let info = obj.info();
+        let pad = "  ".repeat(depth);
+        let _ = write!(
+            out,
+            "{pad}{{\"name\": \"{}\", \"path\": \"{}\", \"kind\": \"{:?}\", \"width\": {}, \"is_const\": {}, \"signed\": {}, \"type\": \"{}\"",
+            esc(&info.name),
+            esc(&info.path),
+            info.kind,
+            info.width,
+            info.is_const,
+            info.signed,
+            esc(&info.type_name)
+        );
+        if info.kind.is_hierarchy() {
+            let children = obj.as_module().ok().and_then(|m| m.children().ok()).unwrap_or_default();
+            if !children.is_empty() {
+                let _ = write!(out, ", \"children\": [\n");
+                for (i, c) in children.iter().enumerate() {
+                    walk(*c, out, depth + 1);
+                    if i + 1 < children.len() {
+                        out.push(',');
+                    }
+                    out.push('\n');
+                }
+                let _ = write!(out, "{pad}]");
+            }
+        } else if info.kind == crate::backend::ObjKind::Array {
+            // Element kind and width from the first element, if reachable.
+            if let Ok(sig) = obj.as_signal() {
+                if let Ok(e) = sig.index(info.range.map(|(l, r)| l.min(r)).unwrap_or(0)) {
+                    let ei = e.info();
+                    let _ = write!(out, ", \"element\": {{\"kind\": \"{:?}\", \"width\": {}}}", ei.kind, ei.width);
+                }
+            }
+            if let Some((l, r)) = info.range {
+                let _ = write!(out, ", \"range\": [{l}, {r}]");
+            }
+        }
+        out.push('}');
+    }
+    fn esc(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+    let mut out = String::new();
+    walk(root.object(), &mut out, 0);
+    out.push('\n');
+    std::fs::write(path, out)
+}
+
 /// The standard top-level task: run the regression, write results, finish.
 /// Backends call [`install_default_entry`] before the simulation starts.
 pub fn install_default_entry() {
@@ -283,6 +348,15 @@ pub fn install_default_entry() {
         };
         runtime::with(|rt| rt.root = Some(root));
         let module = Module::from_handle(root);
+        if let Ok(path) = std::env::var("RIVET_DUMP_HIERARCHY") {
+            match dump_hierarchy(module, std::path::Path::new(&path)) {
+                Ok(()) => log::info!("wrote hierarchy to {path}"),
+                Err(e) => log::error!("cannot write {path}: {e}"),
+            }
+            runtime::with(|rt| rt.exit_code = 0);
+            runtime::finish();
+            return;
+        }
         crate::task::spawn_named("regression", async move {
             let results = run_regression(module).await;
             finish_with(&results);

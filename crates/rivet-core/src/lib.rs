@@ -24,7 +24,7 @@ pub use handle::{Module, Object, Signal};
 pub use runtime::Phase;
 pub use sync::{Event, Lock, Queue};
 pub use task::{spawn, spawn_named, JoinHandle, Scope};
-pub use test::TestDesc;
+pub use test::{Bind, TestDesc};
 pub use time::{Duration, RoundMode, SimTime, TimeExt, Unit};
 pub use triggers::{first, join, next_time_step, read_only, read_write, with_timeout, yield_now, Either, Timer};
 pub use value::{IntoLogicVec, Logic, LogicVec, Unresolved};
