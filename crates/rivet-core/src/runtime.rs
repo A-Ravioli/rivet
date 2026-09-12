@@ -95,6 +95,9 @@ pub struct Runtime {
     ro: PhaseWaiters,
     nts: PhaseWaiters,
     writes: Vec<PendingWrite>,
+    /// Handle -> index into `writes`, so a repeated deposit to one handle in
+    /// a timestep is O(1) to dedup (loading a large memory writes thousands).
+    write_index: HashMap<Handle, usize>,
     /// Spare buffer swapped in at flush time to avoid reallocating.
     writes_spare: Vec<PendingWrite>,
     pub(crate) root: Option<Handle>,
@@ -134,6 +137,7 @@ pub fn init(backend: Box<dyn Backend>) {
         ro: PhaseWaiters::default(),
         nts: PhaseWaiters::default(),
         writes: Vec::new(),
+        write_index: HashMap::default(),
         writes_spare: Vec::new(),
         root: None,
         current_test: None,
@@ -241,7 +245,10 @@ pub fn cancel_all_other_tasks() {
 
 /// Drop any buffered deposits (between tests).
 pub fn discard_pending_writes() {
-    with(|rt| rt.writes.clear());
+    with(|rt| {
+        rt.writes.clear();
+        rt.write_index.clear();
+    });
 }
 
 /// Poll ready tasks until none is runnable.
@@ -370,6 +377,7 @@ fn handle_event(ev: Event) {
                 rt.rw.gen += 1;
                 let spare = std::mem::take(&mut rt.writes_spare);
                 let writes = std::mem::replace(&mut rt.writes, spare);
+                rt.write_index.clear();
                 (writes, std::mem::take(&mut rt.rw.waiters))
             });
             // Apply buffered deposits before waking anyone, so writes made
@@ -560,9 +568,12 @@ impl Runtime {
             return self.backend.write(h, owned_as_value(&value), action);
         }
         // Latest write to a handle wins, but keep first-write order.
-        match self.writes.iter_mut().find(|w| w.handle == h) {
-            Some(w) => w.value = value,
-            None => self.writes.push(PendingWrite { handle: h, value }),
+        match self.write_index.get(&h) {
+            Some(&i) => self.writes[i].value = value,
+            None => {
+                self.write_index.insert(h, self.writes.len());
+                self.writes.push(PendingWrite { handle: h, value });
+            }
         }
         if self.rw.cb.is_none() {
             self.rw.cb = Some(

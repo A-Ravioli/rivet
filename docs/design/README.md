@@ -14,3 +14,5 @@ Read in order.
    with exit criteria.
 4. [`03-status.md`](03-status.md): what is implemented, verified, and still
    open, against the roadmap.
+5. [`04-remaining-work.md`](04-remaining-work.md): the concrete plan for each
+   remaining gap, what it costs, and what needs a licence.

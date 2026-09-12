@@ -144,6 +144,18 @@ impl Build {
         }
         println!("cargo:rerun-if-env-changed=VERILATOR");
 
+        // Generated code is not portable across Verilator versions; start
+        // from a clean obj_dir whenever the tool changes.
+        let version = Command::new(&self.verilator)
+            .arg("--version")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        let stamp = out_dir.join("verilator.version");
+        if std::fs::read_to_string(&stamp).ok().as_deref() != Some(version.as_str()) {
+            let _ = std::fs::remove_dir_all(&obj_dir);
+        }
+
         let mut cmd = Command::new(&self.verilator);
         cmd.args(["--cc", "--vpi", "--public-flat-rw", "--build", "-Mdir"])
             .arg(&obj_dir)
@@ -182,6 +194,8 @@ impl Build {
                 String::from_utf8_lossy(&out.stderr)
             );
         }
+
+        std::fs::write(&stamp, &version).expect("write version stamp");
 
         let root = Command::new(&self.verilator)
             .args(["--getenv", "VERILATOR_ROOT"])
@@ -287,7 +301,11 @@ int rivet_vl_var_find(const char* scope, const char* name, void** datap, int* vl
     if (vp->udims() != 0) return 0;
     *datap = vp->datap();
     *vltype = static_cast<int>(vp->vltype());
+#if defined(VERILATOR_VERSION_INTEGER) && VERILATOR_VERSION_INTEGER >= 5036000
+    *width = vp->dims() == 0 ? 1 : vp->elements(0);
+#else
     *width = vp->dims() == 0 ? 1 : vp->packed().elements();
+#endif
     *is_param = vp->isParam() ? 1 : 0;
     return 1;
 }}

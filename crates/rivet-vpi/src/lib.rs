@@ -120,15 +120,17 @@ impl VpiBackend {
             Sim::Other
         };
         SIM.with(|s| *s.borrow_mut() = sim);
-        // Verilator gained vpiInertialDelay support in 5.036 (cocotb 2.0's
-        // "inertial writes" note). Older Verilators only accept vpiNoDelay.
-        let verilator_inertial = sim == Sim::Verilator && parse_version(&version) >= (5, 36, 0);
-        let deposit_flag = if sim == Sim::Verilator && !verilator_inertial { vpiNoDelay } else { vpiInertialDelay };
+        // Verilator gained vpiInertialDelay in 5.036, but honouring it needs
+        // the simulation loop to call VerilatedVpi::doInertialPuts. Rivet
+        // owns that loop and instead buffers deposits in the runtime until
+        // the ReadWrite phase and applies them as immediate writes, which
+        // behaves identically on every Verilator version and matches the
+        // direct-access path. So Verilator never trusts inertial writes.
+        let deposit_flag = if sim == Sim::Verilator { vpiNoDelay } else { vpiInertialDelay };
         let trusts_inertial = match std::env::var("RIVET_TRUST_INERTIAL_WRITES") {
-            Ok(v) => v == "1",
-            // cocotb's defaults: trust Verilator (5.036+) and GHDL, not
-            // Icarus/Questa/Xcelium/VCS.
-            Err(_) => verilator_inertial || sim == Sim::Ghdl,
+            Ok(v) => v == "1" && sim != Sim::Verilator,
+            // cocotb's defaults: trust GHDL, not Icarus/Questa/Xcelium/VCS.
+            Err(_) => sim == Sim::Ghdl,
         };
         VpiBackend {
             sim,

@@ -35,11 +35,20 @@ cocotb's `value_traffic` number is dominated by converting the 512-bit
 (`docs/design/00-cocotb-analysis.md` §4.2); Rivet reads the vector straight
 into a reusable `aval`/`bval` buffer through `vpiVectorVal`.
 
-## Verilator 5.020 (Rivet only)
+## Verilator 5.036 (cocotb baseline)
 
-cocotb 2.x's Verilator support requires Verilator 5.036 or newer
-(`doInertialPuts`/`evalNeeded` in its `verilator.cpp`), which this container
-does not have, so there is no cocotb baseline here yet.
+cocotb 2.x needs Verilator 5.036+ (`doInertialPuts`/`evalNeeded` in its
+`verilator.cpp`). Verilator 5.036 was built from source for this
+comparison; both harnesses ran the same design and testbench logic.
+
+| Test | cocotb 2.1 | Rivet | Ratio |
+|---|---|---|---|
+| `edge_roundtrip` | 9.34 µs | 1.89 µs | 4.9× |
+| `edge_then_readonly` | 25.9 µs | 2.62 µs | 9.9× |
+| `value_traffic` | 371 µs | 2.81 µs | 132× |
+| `many_tasks` | 366 µs | 20.2 µs | 18× |
+
+## Verilator 5.020 (Rivet only)
 
 | Test | Rivet |
 |---|---|

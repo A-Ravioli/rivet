@@ -80,27 +80,29 @@ impl Direct {
     }
 
     fn write(&self, v: &LogicVec) {
-        // Verilator is two-state: X/Z bits become 0.
-        let word = |i: usize| v.aval().get(i).copied().unwrap_or(0) & !v.bval().get(i).copied().unwrap_or(0);
+        // Verilator is two-state: X/Z bits become 0 (LogicVec::to_u64_lossy).
         let mask = |w: u32, bits: u32| if bits >= 32 { w } else { w & ((1u32 << bits) - 1) };
         unsafe {
             match self.vltype {
-                VLVT_UINT8 => *(self.ptr as *mut u8) = mask(word(0), self.width) as u8,
-                VLVT_UINT16 => *(self.ptr as *mut u16) = mask(word(0), self.width) as u16,
-                VLVT_UINT32 => *(self.ptr as *mut u32) = mask(word(0), self.width),
-                VLVT_UINT64 => {
-                    let mut q = word(0) as u64 | ((word(1) as u64) << 32);
+                VLVT_UINT8 | VLVT_UINT16 | VLVT_UINT32 | VLVT_UINT64 => {
+                    let mut q = v.to_u64_lossy();
                     if self.width < 64 {
                         q &= (1u64 << self.width) - 1;
                     }
-                    *(self.ptr as *mut u64) = q;
+                    match self.vltype {
+                        VLVT_UINT8 => *(self.ptr as *mut u8) = q as u8,
+                        VLVT_UINT16 => *(self.ptr as *mut u16) = q as u16,
+                        VLVT_UINT32 => *(self.ptr as *mut u32) = q as u32,
+                        _ => *(self.ptr as *mut u64) = q,
+                    }
                 }
                 VLVT_WDATA => {
                     let words = self.ptr as *mut u32;
                     let n = (self.width as usize).div_ceil(32);
                     for i in 0..n {
+                        let w = v.aval().get(i).copied().unwrap_or(0) & !v.bval().get(i).copied().unwrap_or(0);
                         let bits = (self.width - 32 * i as u32).min(32);
-                        *words.add(i) = mask(word(i), bits);
+                        *words.add(i) = mask(w, bits);
                     }
                 }
                 _ => unreachable!(),

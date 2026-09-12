@@ -5,7 +5,7 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 | Milestone | Status | Notes |
 |---|---|---|
 | M0 executor + mock simulator | done | `rivet-core`, `rivet-mock`; 13 timing-model/executor tests plus value/time unit tests, no simulator needed |
-| M1 Verilator | done (VPI path) | `rivet-verilator`: build helper, generated shim, Rust main loop, native timer wheel and phase scheduling; VCD/FST tracing; direct signal access (M5) not started |
+| M1 Verilator | done | `rivet-verilator`: build helper, generated shim, Rust main loop, native timer wheel and phase scheduling, direct signal access; VCD/FST tracing; verified on 5.020 and 5.036 |
 | M2 Icarus / general VPI | done | `rivet-vpi`: `vpiVectorVal` values, persistent value-change callbacks, callback re-entrancy handled in the runtime, `vlog_startup_routines` export; other VPI simulators carry cocotb's quirks in code but are unverified |
 | M3 `cargo test` harness and CLI | done | `rivet` CLI (`run`, `build`, `bindgen`, `clean`, `--filter`, `--waves`, `--release`, `--seed`, `--log`), `rivet.toml`, `#[rivet::test]` with `timeout`/`skip`/`expect_fail`/`stage`, JUnit `results.xml`; `rivet::harness::main()` makes `cargo test -p <crate>` run the simulation (`RIVET_SIM` selects the simulator) with `--list`, filters, `--exact`, `--skip`, and libtest-style output. `cargo nextest` is untested |
 | M4 VHDL | partial | VHDL designs run on GHDL through its VPI (`examples/dff_vhdl`, values as binary strings since GHDL has no `vpiVectorVal`); generics are not reachable by name on GHDL; a VHPI backend (NVC, Riviera, Xcelium VHDL, Questa) is not started |
@@ -37,11 +37,15 @@ Where the code stands against [`02-roadmap.md`](02-roadmap.md).
 - A panic in any task fails the current test.
 - FIFO task scheduling.
 
+The plan for everything below and for the unverified rows above is in
+[`04-remaining-work.md`](04-remaining-work.md).
+
 ## Known gaps and decisions
 
-- Deposits on Verilator older than 5.036 are `vpiNoDelay` writes, buffered
-  by the runtime until ReadWrite; on 5.036+ they are `vpiInertialDelay` and
-  trusted, as cocotb does.
+- Deposits on Verilator (every version) are buffered by the runtime until
+  ReadWrite and applied as immediate writes; Rivet does not use Verilator's
+  `vpiInertialDelay` machinery, which would need `doInertialPuts` calls in
+  the loop. Verified identical behaviour on 5.020 and 5.036.
 - Force/Release are reported unsupported on Verilator (`Capabilities`).
 - `Signal::index` and `member` work for unpacked arrays and struct members
   the simulator exposes through `vpi_handle_by_index`/`by_name`; generate
