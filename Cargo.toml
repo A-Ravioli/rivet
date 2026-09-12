@@ -30,6 +30,7 @@ rivet-vpi = { path = "crates/rivet-vpi" }
 rivet-verilator = { path = "crates/rivet-verilator" }
 rivet-manifest = { path = "crates/rivet-manifest" }
 rivet-kit = { path = "crates/rivet-kit" }
+rivet-cli = { path = "crates/rivet-cli" }
 rivet = { path = "crates/rivet" }
 inventory = "0.3"
 log = { version = "0.4", features = ["std"] }

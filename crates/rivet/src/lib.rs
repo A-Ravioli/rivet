@@ -23,6 +23,33 @@ pub use rivet_macros::test;
 
 #[cfg(feature = "verilator")]
 pub use rivet_verilator as verilator;
+
+/// `cargo test` integration. In the test crate, add
+///
+/// ```toml
+/// [[test]]
+/// name = "sim"
+/// harness = false
+/// ```
+///
+/// and a `tests/sim.rs` containing
+///
+/// ```ignore
+/// use example_dff as _;
+/// fn main() -> std::process::ExitCode { rivet::harness::main() }
+/// ```
+///
+/// Then `cargo test -p example-dff` runs the tests on `RIVET_SIM`
+/// (default `icarus`); `cargo test -- --list` lists them without a
+/// simulator.
+#[cfg(feature = "harness")]
+pub mod harness {
+    pub fn main() -> std::process::ExitCode {
+        let tests: Vec<(String, String)> =
+            crate::test::all_tests().iter().map(|t| (t.module.to_string(), t.name.to_string())).collect();
+        rivet_cli::harness_main(tests)
+    }
+}
 #[cfg(feature = "vpi")]
 pub use rivet_vpi as vpi;
 

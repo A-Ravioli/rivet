@@ -11,9 +11,11 @@ rivet-macros = { workspace = true }
 rivet-kit = { workspace = true }
 rivet-vpi = { workspace = true, optional = true }
 rivet-verilator = { workspace = true, optional = true }
+rivet-cli = { workspace = true, optional = true }
 log = { workspace = true }
 
 [features]
 default = ["vpi"]
 vpi = ["dep:rivet-vpi"]
 verilator = ["dep:rivet-verilator"]
+harness = ["dep:rivet-cli"]

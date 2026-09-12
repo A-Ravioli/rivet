@@ -31,6 +31,10 @@ jobs:
         run: target/debug/rivet run --sim verilator -C examples/dff
       - name: VHDL dff example on GHDL
         run: target/debug/rivet run --sim ghdl -C examples/dff_vhdl
+      - name: cargo test integration (dff on Icarus via RIVET_SIM)
+        run: |
+          cargo test -p example-dff -- --list
+          cargo test -p example-dff
       - name: fifo example (kit) on Icarus and Verilator
         run: |
           target/debug/rivet run --sim icarus -C examples/fifo

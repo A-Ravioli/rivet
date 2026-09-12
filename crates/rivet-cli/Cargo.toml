@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Command-line runner for Rivet testbenches"
 
+[lib]
+name = "rivet_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rivet"
 path = "src/main.rs"

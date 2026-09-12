@@ -12,8 +12,13 @@ name = "dff_verilator"
 path = "src/main.rs"
 required-features = ["verilator"]
 
+[[test]]
+name = "sim"
+path = "tests/sim.rs"
+harness = false
+
 [dependencies]
-rivet = { workspace = true }
+rivet = { workspace = true, features = ["harness"] }
 log = { workspace = true }
 
 [build-dependencies]

@@ -52,6 +52,15 @@ target/debug/rivet run --sim icarus -C examples/dff --filter counter --waves --l
 loads the harness into the simulator, and reads back a cocotb-compatible
 `results.xml` from `sim_build/<sim>/`.
 
+With the `harness` feature and a `harness = false` test target (see
+`examples/dff/tests/sim.rs`), plain `cargo test` works too:
+
+```sh
+cargo test -p example-dff -- --list        # no simulator needed
+cargo test -p example-dff                  # runs on Icarus
+RIVET_SIM=verilator cargo test -p example-dff -- counter
+```
+
 ## Typed bindings
 
 ```sh
