@@ -1,0 +1,9 @@
+[package]
+name = "rivet-verilator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rivet-core = { workspace = true }
+log = { workspace = true }

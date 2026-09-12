@@ -1,0 +1,18 @@
+[package]
+name = "rivet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rust hardware verification harness replacing cocotb"
+
+[dependencies]
+rivet-core = { workspace = true }
+rivet-macros = { workspace = true }
+rivet-vpi = { workspace = true, optional = true }
+rivet-verilator = { workspace = true, optional = true }
+log = { workspace = true }
+
+[features]
+default = ["vpi"]
+vpi = ["dep:rivet-vpi"]
+verilator = ["dep:rivet-verilator"]

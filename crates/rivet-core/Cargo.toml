@@ -1,0 +1,10 @@
+[package]
+name = "rivet-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core executor, triggers, values, and backend trait for the Rivet hardware verification harness"
+
+[dependencies]
+inventory = { workspace = true }
+log = { workspace = true }

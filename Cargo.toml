@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rivet-core",
+    "crates/rivet-mock",
+    "crates/rivet-macros",
+    "crates/rivet-vpi",
+    "crates/rivet-verilator",
+    "crates/rivet",
+    "crates/rivet-cli",
+    "examples/dff",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/A-Ravioli/rivet"
+
+[workspace.dependencies]
+rivet-core = { path = "crates/rivet-core" }
+rivet-mock = { path = "crates/rivet-mock" }
+rivet-macros = { path = "crates/rivet-macros" }
+rivet-vpi = { path = "crates/rivet-vpi" }
+rivet-verilator = { path = "crates/rivet-verilator" }
+rivet = { path = "crates/rivet" }
+inventory = "0.3"
+log = { version = "0.4", features = ["std"] }
+cc = "1"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[profile.release]
+debug = 1
