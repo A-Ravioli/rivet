@@ -1,0 +1,23 @@
+[package]
+name = "example-fifo"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "fifo_verilator"
+path = "src/main.rs"
+required-features = ["verilator"]
+
+[dependencies]
+rivet = { workspace = true, features = ["vpi"] }
+log = { workspace = true }
+
+[build-dependencies]
+rivet-verilator = { workspace = true }
+
+[features]
+verilator = ["rivet/verilator"]

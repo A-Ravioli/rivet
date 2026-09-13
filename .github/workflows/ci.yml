@@ -1,0 +1,255 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install simulators
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator ghdl
+      - name: Versions
+        run: iverilog -V | head -1; verilator --version; ghdl --version | head -1; cargo --version
+      - name: Unit, mock-simulator, and CLI end-to-end tests
+        run: cargo test --workspace --no-fail-fast
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: dff example on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/dff
+      - name: dff example on Verilator
+        run: target/debug/rivet run --sim verilator -C examples/dff
+      - name: VHDL dff example on GHDL
+        run: target/debug/rivet run --sim ghdl -C examples/dff_vhdl
+      - name: cargo test integration (dff on Icarus via RIVET_SIM)
+        run: |
+          cargo test -p example-dff -- --list
+          cargo test -p example-dff
+      - name: Edit-to-result latency stays under a second for a test edit
+        run: |
+          python3 ci/loop-latency.py --sim icarus --example dff --filter counter | tee loop.txt
+          python3 - <<'EOF'
+          import re, sys
+          text = open("loop.txt").read()
+          m = re.search(r"^test\s+([\d.]+)$", text, re.M)
+          assert m, text
+          secs = float(m.group(1))
+          print(f"test-only edit: {secs}s")
+          sys.exit(1 if secs > 5.0 else 0)
+          EOF
+      - name: cargo nextest lists and runs the same tests
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+          cargo nextest list -p example-dff
+          cargo nextest run -p example-dff --profile ci
+      - name: fifo example (kit) on Icarus and Verilator
+        run: |
+          target/debug/rivet run --sim icarus -C examples/fifo
+          target/debug/rivet run --sim verilator -C examples/fifo
+      - name: conformance suite on Icarus and Verilator
+        run: |
+          target/debug/rivet run --sim icarus -C examples/conformance
+          target/debug/rivet run --sim verilator -C examples/conformance
+      - name: bus example (kit, coverage, goldens, param sets, sharding) on Icarus and Verilator
+        run: |
+          target/debug/rivet run --sim icarus -C examples/bus -j 3 --cov-threshold 99
+          target/debug/rivet run --sim verilator -C examples/bus
+          target/debug/rivet cov report -C examples/bus --sim icarus --threshold 100
+          cargo test -p example-bus -- --test-threads 2
+      - name: Benchmarks (smoke)
+        env:
+          RIVET_BENCH_N: "2000"
+        run: |
+          target/debug/rivet run --sim icarus -C examples/bench
+          target/debug/rivet run --sim verilator -C examples/bench
+
+  python-model:
+    name: python reference-model bridge
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Kit tests with an embedded interpreter
+        run: cargo test -p rivet-kit --features python
+
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install simulators
+        run: brew install icarus-verilog verilator
+      - name: Unit and mock-simulator tests
+        run: cargo test --workspace --no-fail-fast
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: dff example on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/dff
+      - name: fifo example on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/fifo
+      - name: conformance on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/conformance
+
+  book:
+    name: book builds and links resolve
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mdBook
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build the book
+        run: mdbook build docs/book
+      - name: Every SUMMARY entry has a file, and every local link resolves
+        run: python3 ci/check-book-links.py
+
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - name: Check the workspace on the MSRV
+        run: cargo check --workspace --all-targets
+
+  packaging:
+    name: crates package cleanly
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Metadata crates.io requires
+        run: python3 ci/check-package-metadata.py
+      - name: Package the crates with no internal dependencies
+        # The rest cannot be packaged until their path dependencies exist in
+        # the registry, which happens during the first release.
+        run: |
+          set -eu
+          for c in rivet-core rivet-macros rivet-manifest; do
+            cargo package -p "$c" --no-verify
+          done
+
+  nvc-vhpi:
+    # VHDL through VHPI. NVC is not packaged for Ubuntu 24.04, so it is
+    # built from a release tarball and cached by version.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache NVC build
+        id: cache-nvc
+        uses: actions/cache@v4
+        with:
+          path: /opt/nvc
+          key: nvc-1.17.1-ubuntu-24.04-v1
+      - name: Install NVC's build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential automake autoconf flex check llvm-dev pkg-config zlib1g-dev libdw-dev libffi-dev libzstd-dev
+      - name: Build NVC
+        if: steps.cache-nvc.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL https://github.com/nickg/nvc/releases/download/r1.17.1/nvc-1.17.1.tar.gz -o /tmp/nvc.tar.gz
+          mkdir -p /tmp/nvc && tar xzf /tmp/nvc.tar.gz -C /tmp/nvc --strip-components=1
+          # NVC's configure refuses an in-tree build.
+          mkdir -p /tmp/nvc/build && cd /tmp/nvc/build
+          ../configure --prefix=/opt/nvc
+          make -j"$(nproc)"
+          sudo make install
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: VHDL examples on NVC
+        run: |
+          export PATH=/opt/nvc/bin:$PATH
+          nvc --version
+          target/debug/rivet run --sim nvc -C examples/dff_vhdl
+          target/debug/rivet run --sim nvc -C examples/vhdl_types
+      - name: The same VHDL types example on GHDL
+        run: |
+          sudo apt-get install -y --no-install-recommends ghdl
+          target/debug/rivet run --sim ghdl -C examples/vhdl_types
+
+  python-integrations:
+    # The Edalize/FuseSoC backend and the rivet_py shim for cocotb.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install simulators and Python packages
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog
+          pip install maturin fusesoc edalize cocotb
+          pip install -e integrations/edalize
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: FuseSoC runs the dff example through the rivet Edalize backend
+        env:
+          RIVET_BIN: ${{ github.workspace }}/target/debug/rivet
+        run: |
+          mkdir -p /tmp/fusesoc && cd /tmp/fusesoc
+          fusesoc --cores-root ${{ github.workspace }}/examples/dff run --no-export --target sim --tool rivet rivet:examples:dff
+      - name: rivet_py wheel, unit tests, and a cocotb test using it
+        run: |
+          cd python/rivet_py
+          cargo clippy --release -- -D warnings
+          maturin build --release -o dist
+          pip install dist/*.whl
+          cd tests && python -m unittest -v test_shim
+          cd cocotb_dff && python run.py
+
+  verilator-5036:
+    # Verilator 5.036 is the oldest version cocotb 2.x supports and renamed
+    # symbol-table accessors; the harness must work there too. Built from
+    # source and cached by version.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache Verilator build
+        id: cache-verilator
+        uses: actions/cache@v4
+        with:
+          path: /opt/verilator-5.036
+          key: verilator-5.036-ubuntu-24.04-v1
+      - name: Install Verilator's build and runtime dependencies
+        # Needed on every run: the cached tree's makefiles call ccache, and
+        # verilating a design needs perl, python3, g++ and libfl at run time.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git help2man perl python3 make autoconf g++ flex bison ccache libfl2 libfl-dev zlib1g-dev
+      - name: Build Verilator 5.036
+        if: steps.cache-verilator.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v5.036 https://github.com/verilator/verilator.git /tmp/verilator
+          cd /tmp/verilator && autoconf && ./configure --prefix=/opt/verilator-5.036 && make -j"$(nproc)" && sudo make install
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: Examples on Verilator 5.036
+        env:
+          VERILATOR: /opt/verilator-5.036/bin/verilator
+        run: |
+          export PATH=/opt/verilator-5.036/bin:$PATH
+          verilator --version
+          target/debug/rivet run --sim verilator -C examples/dff
+          target/debug/rivet run --sim verilator -C examples/fifo
+          target/debug/rivet run --sim verilator -C examples/conformance

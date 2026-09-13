@@ -1,0 +1,18 @@
+[package]
+name = "example-vhdl-types"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# One backend per simulator: GHDL through VPI, NVC through VHPI.
+rivet = { workspace = true, default-features = false }
+log = { workspace = true }
+
+[features]
+default = ["vpi"]
+vpi = ["rivet/vpi"]
+vhpi = ["rivet/vhpi"]

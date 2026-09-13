@@ -1,0 +1,30 @@
+CAPI=2:
+name: rivet:examples:dff:0.1.0
+description: The Rivet dff example run through FuseSoC and the edalize-rivet backend
+
+filesets:
+  rtl:
+    files:
+      - hdl/dff.sv
+    file_type: systemVerilogSource
+  harness:
+    files:
+      - Cargo.toml
+      - build.rs
+      - src/lib.rs
+      - src/dut.rs
+      - src/main.rs
+      - tests/sim.rs
+    file_type: user
+
+targets:
+  default: &default
+    filesets: [rtl, harness]
+    toplevel: dff
+  sim:
+    <<: *default
+    default_tool: rivet
+    tools:
+      rivet:
+        simulator: icarus
+        rivet_options: []

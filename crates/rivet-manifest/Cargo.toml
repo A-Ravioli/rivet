@@ -1,0 +1,16 @@
+[package]
+name = "rivet-manifest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rivet.toml parsing for the Rivet hardware verification harness"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

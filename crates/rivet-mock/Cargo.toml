@@ -1,0 +1,21 @@
+[package]
+name = "rivet-mock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure-Rust mock simulator for testing the Rivet harness"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[dependencies]
+rivet-core = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1"
+rivet-macros = { workspace = true }
+rivet-kit = { workspace = true }

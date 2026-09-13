@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rivet-core",
+    "crates/rivet-mock",
+    "crates/rivet-macros",
+    "crates/rivet-vpi",
+    "crates/rivet-vhpi",
+    "crates/rivet-verilator",
+    "crates/rivet-manifest",
+    "crates/rivet-kit",
+    "crates/rivet",
+    "crates/rivet-cli",
+    "examples/dff",
+    "examples/bench",
+    "examples/bench_soc",
+    "examples/fifo",
+    "examples/dff_vhdl",
+    "examples/vhdl_types",
+    "examples/conformance",
+    "examples/bus",
+]
+# Built separately with maturin (needs a Python interpreter).
+exclude = ["python/rivet_py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/A-Ravioli/rivet"
+homepage = "https://github.com/A-Ravioli/rivet"
+categories = ["development-tools::testing", "simulation"]
+keywords = ["hdl", "verilog", "vhdl", "verification", "cocotb"]
+
+[workspace.dependencies]
+rivet-core = { path = "crates/rivet-core", version = "0.1.0" }
+rivet-mock = { path = "crates/rivet-mock", version = "0.1.0" }
+rivet-macros = { path = "crates/rivet-macros", version = "0.1.0" }
+rivet-vpi = { path = "crates/rivet-vpi", version = "0.1.0" }
+rivet-vhpi = { path = "crates/rivet-vhpi", version = "0.1.0" }
+rivet-verilator = { path = "crates/rivet-verilator", version = "0.1.0" }
+rivet-manifest = { path = "crates/rivet-manifest", version = "0.1.0" }
+rivet-kit = { path = "crates/rivet-kit", version = "0.1.0" }
+rivet-cli = { path = "crates/rivet-cli", version = "0.1.0" }
+# No default backend: each test crate picks VPI, VHPI or Verilator,
+# because a library carrying two of them fails to load.
+rivet = { path = "crates/rivet", version = "0.1.0", default-features = false }
+inventory = "0.3"
+# A small, dependency-free regular expression engine for test filters.
+regex-lite = "0.1"
+log = { version = "0.4", features = ["std"] }
+cc = "1"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[profile.release]
+debug = 1

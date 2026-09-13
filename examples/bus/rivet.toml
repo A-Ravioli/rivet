@@ -1,0 +1,20 @@
+[design]
+top = "bus_top"
+sources = ["hdl/bus_top.sv"]
+timescale = "1ns/1ps"
+
+[design.params]
+REG_INIT = "0"
+
+[design.param_sets.init0]
+REG_INIT = "0"
+
+[design.param_sets.init5]
+REG_INIT = "5"
+
+[sim.icarus]
+args = ["-g2012"]
+
+[sim.verilator]
+args = ["-Wno-WIDTH", "-Wno-UNUSEDSIGNAL", "-Wno-UNUSEDPARAM"]
+trace = true

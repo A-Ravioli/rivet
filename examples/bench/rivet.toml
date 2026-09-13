@@ -1,0 +1,6 @@
+[design]
+top = "bench"
+sources = ["hdl/bench.sv"]
+
+[sim.icarus]
+args = ["-g2012"]

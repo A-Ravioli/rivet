@@ -1,0 +1,99 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build the CLI
+        run: cargo build --release -p rivet-cli --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          set -eu
+          dir="rivet-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "$dir"
+          cp target/${{ matrix.target }}/release/rivet target/${{ matrix.target }}/release/cargo-rivet "$dir/"
+          cp README.md CHANGELOG.md "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rivet-${{ matrix.target }}
+          path: |
+            rivet-*.tar.gz
+            rivet-*.tar.gz.sha256
+
+  wheel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install maturin
+      - name: Build the rivet_py wheel
+        working-directory: python/rivet_py
+        run: maturin build --release -o dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rivet-py-wheel
+          path: python/rivet_py/dist/*.whl
+
+  publish-crates:
+    needs: [binaries, wheel]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          for c in rivet-core rivet-macros rivet-manifest rivet-kit rivet-vpi rivet-verilator rivet-mock rivet rivet-cli; do
+            echo "::group::$c"
+            cargo publish -p "$c" --no-verify
+            # crates.io needs a moment before a dependant can resolve the new version
+            sleep 30
+            echo "::endgroup::"
+          done
+
+  release:
+    needs: [binaries, wheel]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.whl
+          generate_release_notes: true

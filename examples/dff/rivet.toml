@@ -1,0 +1,9 @@
+[design]
+top = "dff"
+sources = ["hdl/dff.sv"]
+
+[sim.icarus]
+args = ["-g2012"]
+
+[sim.verilator]
+trace = true

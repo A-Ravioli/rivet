@@ -1,0 +1,10 @@
+[design]
+top = "dff"
+language = "vhdl"
+sources = ["hdl/dff.vhd"]
+
+[sim.ghdl]
+args = ["--std=08"]
+
+[sim.nvc]
+args = ["--std=2008"]

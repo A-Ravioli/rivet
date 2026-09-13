@@ -1,0 +1,19 @@
+[package]
+name = "example-dff-vhdl"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The backend is chosen per simulator: GHDL goes through VPI, NVC through
+# VHPI, and a library that carries both fails to load on NVC.
+rivet = { workspace = true, default-features = false }
+log = { workspace = true }
+
+[features]
+default = ["vpi"]
+vpi = ["rivet/vpi"]
+vhpi = ["rivet/vhpi"]

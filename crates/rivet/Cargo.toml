@@ -1,0 +1,31 @@
+[package]
+name = "rivet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Rivet hardware verification harness: async tests for Verilog and VHDL designs"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[dependencies]
+rivet-core = { workspace = true }
+rivet-macros = { workspace = true }
+rivet-kit = { workspace = true }
+rivet-vpi = { workspace = true, optional = true }
+rivet-vhpi = { workspace = true, optional = true }
+rivet-verilator = { workspace = true, optional = true }
+rivet-cli = { workspace = true, optional = true }
+log = { workspace = true }
+
+[features]
+default = ["vpi"]
+vpi = ["dep:rivet-vpi"]
+# VHDL through VHPI (NVC). Can be enabled alongside `vpi`: one cdylib then
+# serves both a Verilog and a VHDL simulator.
+vhpi = ["dep:rivet-vhpi"]
+verilator = ["dep:rivet-verilator"]
+harness = ["dep:rivet-cli"]

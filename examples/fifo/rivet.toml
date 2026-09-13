@@ -1,0 +1,6 @@
+[design]
+top = "fifo"
+sources = ["hdl/fifo.sv"]
+
+[sim.icarus]
+args = ["-g2012"]

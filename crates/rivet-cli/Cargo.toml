@@ -1,0 +1,32 @@
+[package]
+name = "rivet-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command-line runner for Rivet testbenches"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[lib]
+name = "rivet_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rivet"
+path = "src/main.rs"
+
+[[bin]]
+name = "cargo-rivet"
+path = "src/cargo_rivet.rs"
+
+[dependencies]
+rivet-manifest = { workspace = true }
+rivet-core = { workspace = true }
+serde_json = "1"
+
+[dev-dependencies]
+syn = { workspace = true }

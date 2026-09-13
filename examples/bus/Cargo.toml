@@ -1,0 +1,28 @@
+[package]
+name = "example-bus"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "bus_verilator"
+path = "src/main.rs"
+required-features = ["verilator"]
+
+[[test]]
+name = "sim"
+path = "tests/sim.rs"
+harness = false
+
+[dependencies]
+rivet = { workspace = true, features = ["harness", "vpi"] }
+log = { workspace = true }
+
+[build-dependencies]
+rivet-verilator = { workspace = true }
+
+[features]
+verilator = ["rivet/verilator"]

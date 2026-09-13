@@ -1,0 +1,9 @@
+[design]
+top = "soc"
+sources = ["hdl/picorv32.v", "hdl/soc.v"]
+
+[sim.icarus]
+args = ["-g2012"]
+
+[sim.verilator]
+args = ["-Wno-fatal"]
