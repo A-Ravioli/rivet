@@ -1,0 +1,5 @@
+# A test crate builds as a `cdylib` whose `vpi_*` and `vhpi_*` references
+# are resolved by the simulator that loads it. ELF linkers allow that by
+# default; Apple's does not, and needs to be told.
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]

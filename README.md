@@ -9,8 +9,13 @@ interpreter and string-typed values with an in-process native executor and
 `aval`/`bval` vectors. On Icarus the harness overhead per clock edge is about
 1.4 µs against roughly 25 µs for cocotb; see [`docs/benchmarks.md`](docs/benchmarks.md).
 
-Status: Icarus Verilog, Verilator, and GHDL (VHDL) work end to end; see
-[`docs/design/03-status.md`](docs/design/03-status.md). Design documents are in
+Status: four simulators are verified end to end. Icarus Verilog 12 and
+Verilator 5.020/5.036 through VPI and direct access, NVC 1.23 through VHPI,
+GHDL 4.1 through its VPI. Questa, Xcelium, VCS, Riviera and DSim have launch
+flows but have never been run; see
+[`docs/design/03-status.md`](docs/design/03-status.md) and
+[`docs/SIMULATOR-QUIRKS.md`](docs/SIMULATOR-QUIRKS.md). The book is in
+[`docs/book`](docs/book), design documents in
 [`docs/design/`](docs/design/README.md); coming from cocotb, start with
 [`docs/migration.md`](docs/migration.md).
 
@@ -31,6 +36,15 @@ What it does beyond cocotb:
   parameterisation; `#[rivet::test(params = [8, 16])]`.
 - `rivet bindgen` turns `typedef enum` and `typedef struct packed` into
   Rust types; per-test log files and JSON logs; per-test waveform files.
+- `rivet new counter` scaffolds a testbench crate that passes as generated.
+- `#[rivet::fixture]` for async setup a test asks for by argument name, torn
+  down when the value drops; `rivet::skip(reason)` and
+  `rivet::runtime::finish_test()` end a test from anywhere.
+- Regular-expression filters, `--shuffle`, `expect_fail = "message"`,
+  `expect_timeout`, and `file`/`lineno` in `results.xml`; `cargo nextest run`
+  puts each test in its own process.
+- `Signal::slice(hi, lo)` for bit ranges; `enum_name()` for VHDL enumeration
+  literals where the simulator reports them.
 - `fusesoc run --tool rivet` through the Edalize backend in
   `integrations/edalize`; `python/rivet_py` brings the kit to cocotb.
 
@@ -63,18 +77,23 @@ binary that links the model. See [`examples/dff`](examples/dff) for the
 
 ```sh
 cargo build -p rivet-cli
+target/debug/rivet new counter --path "$PWD"   # a crate whose 2 tests pass as generated
+target/debug/rivet run --sim icarus -C counter
+
 target/debug/rivet run --sim icarus    -C examples/dff
 target/debug/rivet run --sim verilator -C examples/dff
 target/debug/rivet run --sim ghdl      -C examples/dff_vhdl
+target/debug/rivet run --sim nvc       -C examples/vhdl_types
 target/debug/rivet run --sim icarus -C examples/dff --filter counter --waves --log debug
 target/debug/rivet run --sim icarus -C examples/bus -j 4 --cov-threshold 95 --seed 42
 target/debug/rivet watch --sim verilator -C examples/bus
 target/debug/rivet cov report -C examples/bus --threshold 100
 ```
 
-`rivet run` builds the crate, compiles the design described in `rivet.toml`,
-loads the harness into the simulator, and reads back a cocotb-compatible
-`results.xml` from `sim_build/<sim>/`.
+`--path` points the new crate at this checkout; without it the crate depends
+on the published `rivet` crate. `rivet run` builds the crate, compiles the
+design described in `rivet.toml`, loads the harness into the simulator, and
+reads back a cocotb-compatible `results.xml` from `sim_build/<sim>/`.
 
 With the `harness` feature and a `harness = false` test target (see
 `examples/dff/tests/sim.rs`), plain `cargo test` works too:
@@ -117,9 +136,10 @@ async fn typed(dut: Dut) -> rivet::Result<()> {
 |---|---|
 | `rivet-core` | executor, triggers, values, handles, `Backend` trait, runtime, test registry |
 | `rivet-mock` | pure-Rust event simulator for testing the harness itself |
-| `rivet-vpi` | VPI backend (Icarus, Verilator's VPI, and the cocotb-catalogued quirks for others) |
+| `rivet-vpi` | VPI backend (Icarus, GHDL, Verilator's VPI, and the cocotb-catalogued quirks for others) |
+| `rivet-vhpi` | VHPI backend (NVC; Questa and Riviera unverified) |
 | `rivet-verilator` | Verilator build helper, C++ shim, simulation main loop |
-| `rivet-macros` | `#[rivet::test]` |
+| `rivet-macros` | `#[rivet::test]`, `#[rivet::fixture]`, `#[derive(Randomize)]` |
 | `rivet-kit` | `Reset`, `Driver`/`Monitor`, bus models, `Memory`, `Scoreboard`, `ModelScoreboard`, checkers, `Trace` |
 | `rivet-manifest` | `rivet.toml` |
 | `rivet-cli` | the `rivet` command |
@@ -129,4 +149,5 @@ async fn typed(dut: Dut) -> rivet::Result<()> {
 
 ## Requirements
 
-Rust stable, and Icarus Verilog 11+, Verilator 5.x with a C++17 compiler, or GHDL 4.x.
+Rust 1.87 or later, and one of Icarus Verilog 11+, Verilator 5.x with a
+C++17 compiler, GHDL 4.x or NVC 1.17+ for VHDL.

@@ -243,6 +243,16 @@ fn main() -> std::process::ExitCode {{
 
     write(&root, ".gitignore", "/target\n/sim_build\n")?;
 
+    // The library's `vpi_*` references are resolved by the simulator that
+    // loads it. Apple's linker rejects that unless told.
+    write(
+        &root,
+        ".cargo/config.toml",
+        r#"[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
+"#,
+    )?;
+
     write(
         &root,
         "README.md",

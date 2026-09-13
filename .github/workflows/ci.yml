@@ -168,7 +168,11 @@ jobs:
         run: |
           curl -sSL https://github.com/nickg/nvc/releases/download/r1.17.1/nvc-1.17.1.tar.gz -o /tmp/nvc.tar.gz
           mkdir -p /tmp/nvc && tar xzf /tmp/nvc.tar.gz -C /tmp/nvc --strip-components=1
-          cd /tmp/nvc && ./configure --prefix=/opt/nvc && make -j"$(nproc)" && sudo make install
+          # NVC's configure refuses an in-tree build.
+          mkdir -p /tmp/nvc/build && cd /tmp/nvc/build
+          ../configure --prefix=/opt/nvc
+          make -j"$(nproc)"
+          sudo make install
       - name: Build CLI
         run: cargo build -p rivet-cli
       - name: VHDL examples on NVC

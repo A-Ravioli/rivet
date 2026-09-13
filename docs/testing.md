@@ -63,9 +63,11 @@ skips itself when its tool is not installed, so `cargo test` alone proves
 less than the list above.
 
 CI runs all of the above on Ubuntu 24.04 with apt Icarus 12, Verilator
-5.020 and GHDL 4.1, a second job with Verilator 5.036 built from source,
-a third job for the Python integrations, a job that lists and runs the dff
-example under `cargo nextest`, and a job pinning the 1.87 MSRV.
+5.020 and GHDL 4.1, a second job with Verilator 5.036 built from source, a
+third job for the Python integrations, a fourth that builds NVC 1.17.1 and
+runs both VHDL examples on it, a job that lists and runs the dff example
+under `cargo nextest`, and a job pinning the 1.87 MSRV. The NVC numbers in
+this file were taken on 1.23; CI is what says they still hold on 1.17.1.
 
 ## What the suites found
 
