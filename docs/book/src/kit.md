@@ -105,6 +105,51 @@ results.observe(dut.alu_out.get_u64()?);
 sb.finish()?;
 ```
 
+## A Python reference model
+
+A team moving from cocotb often has a model already written in Python, often
+built on numpy. `rivet-kit`'s optional `python` feature turns such a
+function into a `Model`, so a Rivet test can score against it instead of the
+model being rewritten first.
+
+```toml
+[dependencies]
+rivet-kit = { version = "0.1.0", features = ["python"] }
+```
+
+The feature is off by default because enabling it links libpython into the
+test library.
+
+```rust
+let model = PyModel::from_source("def step(x): return (x * 3) & 0xff", "step")?;
+let mut sb = ModelScoreboard::new("alu", model);
+sb.drive(7u64);
+sb.observe(dut_result);
+```
+
+| Call | Meaning |
+|---|---|
+| `PyModel::from_source(source, function)` | compile inline source and take `function` out of it |
+| `PyModel::from_file(path, function)` | the same from a file; the file's directory goes on `sys.path`, so the model can import its own helpers |
+| `model.call_u64(x)?`, `model.call_slice(&xs)?` | call it directly, outside a scoreboard |
+| `model.name()` | the function's name, for error messages |
+
+`PyModel` implements `Model<u64, u64>` and `Model<Vec<u64>, Vec<u64>>`, so it
+drops into `ModelScoreboard` like any other model. The rules a model may use:
+
+- Returning `None` means this input produces no output, which is how a model
+  with latency or batching is written.
+- A model may keep state between calls.
+- An optional module-level `reset()` is picked up automatically and called
+  when the scoreboard resets.
+- A missing or non-callable function is an error from `from_source` and
+  `from_file`, not a panic later.
+
+The interpreter is embedded in the test process. The call happens inside the
+test's own task and the GIL is held only for the duration of the call, so
+the simulator hot path is untouched. A Python model still costs an
+interpreter call per item, so it is for scoring, not for per-cycle work.
+
 ## Memory
 
 `Memory` is a sparse, page-backed byte memory shared by handle. It backs the

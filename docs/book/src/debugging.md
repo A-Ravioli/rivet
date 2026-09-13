@@ -135,10 +135,16 @@ rivet run --sim icarus --waves            # sim_build/icarus/<top>.fst
 rivet run --sim verilator --waves         # sim_build/verilator/<top>.vcd
 rivet run --sim verilator --waves-per-test
 rivet run --sim ghdl --waves              # sim_build/ghdl/<top>.ghw
+rivet run --sim nvc --waves               # sim_build/nvc/<top>.fst
 ```
 
 Verilator needs `trace = true` under `[sim.verilator]` in `rivet.toml` for the
 model to be built with tracing at all.
+
+`--wave-open` opens the dump the run produced when it finishes, in `surfer`
+or, failing that, in `gtkwave`, and prints where the dump is when neither is
+installed. It implies `--waves`. On Questa, Xcelium and VCS, `--gui` runs
+the tool's own GUI instead and leaves the run under your control.
 
 A whole-run dump of a long regression is large and mostly uninteresting, so
 the testbench can open a window around the part that matters:
@@ -163,6 +169,7 @@ logs a warning. What each simulator supports:
 | Verilator | yes | yes (`<name>.vcd` or `.fst`) |
 | Icarus (`--waves`) | yes (`$dumpon`/`$dumpoff`) | no: one file per run |
 | GHDL | no (`--wave` covers the whole run) | no |
+| NVC | no (`--wave` covers the whole run) | no |
 
 With `--waves-per-test` the runner calls `start` with `<module>__<test>`
 before each test and `off` after it.

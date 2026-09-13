@@ -157,6 +157,7 @@ The rules:
 | Rule | Detail |
 |---|---|
 | The function must be `async` and take exactly one argument, the dut | anything else is a compile error |
+| It takes the same dut type the test takes | a test on a generated `Dut` needs a fixture on `Dut`; both are `Clone`, and the fixture gets a clone |
 | The argument name in the test is the fixture name | there is no separate registry and no string to keep in step |
 | Fixture arguments come after the dut, and after the `params` value | `async fn t(dut: Module, beats: u32, ready: Signal)` |
 | A fixture may return `rivet::Result<T>` for any `T` | so it can use `?` internally; returning a plain value works for `Module`, `Signal` and `()` |
@@ -386,6 +387,9 @@ Two calls end a running test before its body returns.
 | `rivet::skip(reason)` | `SKIP` | something the simulator or design in front of the test cannot do |
 | `rivet::runtime::finish_test()` | `PASS` | the test is done and the main task would otherwise keep waiting |
 
+These are run-time decisions, unlike the `skip` attribute in the table
+above, which keeps a test from starting at all.
+
 `skip` returns an `Error`, so a test ends with it through `?` or `return`:
 
 ```rust
@@ -429,13 +433,13 @@ test logs an error and does nothing.
 | positional filters, `--exact`, `--skip` | `cargo test` |
 | `--shuffle` (`RIVET_SHUFFLE`) | `rivet run` |
 
-Each `--filter` pattern is a regular expression, searched (not anchored)
-against `module::name` and against the bare test name, which is what
-cocotb's `COCOTB_TEST_FILTER` does. A pattern that is not valid regular
-expression syntax falls back to a substring match, and so does a valid one
-that matches nothing literally. That fallback is what makes a parametrised
-name select itself: `axi_mem_bursts[16]` is a character class to a regular
-expression engine and a test name to the person typing it.
+Each `--filter` pattern is tried first as a regular expression, searched
+(not anchored) against `module::name` and against the bare test name, which
+is what cocotb's `COCOTB_TEST_FILTER` does. A pattern that does not compile,
+or that compiles and matches nothing, is then tried as a literal substring.
+That fallback is what makes a parametrised name select itself:
+`axi_mem_bursts[16]` is a character class to a regular expression engine and
+a test name to the person typing it.
 
 ```sh
 rivet run --filter 'counter|fifo'          # either
