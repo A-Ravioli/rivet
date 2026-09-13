@@ -15,6 +15,16 @@ fn bind_signal(m: &Module, name: &str, width: u32) -> Result<Signal> {
     Ok(s)
 }
 
+fn bind_array_2d(m: &Module, name: &str, lo: i64, hi: i64, ilo: i64, ihi: i64) -> Result<Vec<Vec<Signal>>> {
+    let a = m.signal(name)?;
+    (lo..=hi)
+        .map(|i| {
+            let row = a.index(i)?;
+            (ilo..=ihi).map(|j| row.index(j)).collect::<Result<Vec<Signal>>>()
+        })
+        .collect()
+}
+
 fn bind_array(m: &Module, name: &str, lo: i64, hi: i64) -> Result<Vec<Signal>> {
     let a = m.signal(name)?;
     (lo..=hi).map(|i| a.index(i)).collect()
