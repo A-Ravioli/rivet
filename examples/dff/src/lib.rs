@@ -224,3 +224,25 @@ async fn generate_blocks(dut: Module) -> rivet::Result<()> {
     ensure!(gen.index(3).is_err(), "gen[3] must not exist");
     Ok(())
 }
+
+/// A fixture: the clock started and reset released, shared by the tests
+/// below. Teardown is `Drop` on what it returns.
+#[rivet::fixture]
+async fn ready(dut: Module) -> rivet::Result<Signal> {
+    let clk = dut.signal("clk")?;
+    Clock::start(clk, 10.ns());
+    reset(&dut, clk).await?;
+    Ok(clk)
+}
+
+#[rivet::test(timeout = 100.us())]
+async fn fixture_gives_a_running_clock(dut: Module, ready: Signal) -> rivet::Result<()> {
+    // `ready` is the clock, already running, reset already released.
+    let d = dut.signal("d")?;
+    let q = dut.signal("q")?;
+    d.set(0xa5);
+    ready.rising_edge().await;
+    read_only().await;
+    assert_eq!(q.get_u64()?, 0xa5);
+    Ok(())
+}

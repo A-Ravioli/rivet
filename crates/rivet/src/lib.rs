@@ -19,6 +19,7 @@
 
 pub use rivet_core::*;
 pub use rivet_kit as kit;
+pub use rivet_macros::fixture;
 pub use rivet_macros::test;
 pub use rivet_macros::Randomize;
 

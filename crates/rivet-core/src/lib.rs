@@ -8,6 +8,7 @@ pub mod clock;
 pub mod coverage;
 pub mod error;
 pub mod executor;
+pub mod fixture;
 pub mod fxhash;
 pub mod handle;
 pub mod log;
@@ -41,7 +42,7 @@ pub fn skip(why: impl Into<String>) -> Error {
     Error::Skip(why.into())
 }
 pub use executor::WaitOn;
-pub use handle::{Module, Object, Signal};
+pub use handle::{Module, Object, Signal, Slice};
 pub use random::{rng, Random, Randomize, Rng};
 pub use runtime::{dump_tasks, Phase};
 pub use sync::{Event, Lock, Queue};

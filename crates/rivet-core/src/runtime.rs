@@ -246,6 +246,13 @@ pub fn cancel_all_other_tasks() {
 }
 
 /// Drop any buffered deposits (between tests).
+/// The value already buffered for a handle in this time step, if any.
+/// A read-modify-write (a slice assignment) starts from it, so two slice
+/// writes in one phase compose instead of the second losing the first.
+pub fn pending_write(h: Handle) -> Option<OwnedValue> {
+    with(|rt| rt.write_index.get(&h).map(|&i| rt.writes[i].value.clone()))
+}
+
 pub fn discard_pending_writes() {
     with(|rt| {
         rt.writes.clear();

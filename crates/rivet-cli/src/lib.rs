@@ -56,6 +56,10 @@ pub struct Opts {
     pub update_golden: bool,
     /// Shuffle the test order within each stage, reproducibly from the seed.
     pub shuffle: bool,
+    /// Put this run's results and logs in `sim_build/<sim>/<suffix>/` while
+    /// the design build stays shared. Used when one process runs one test,
+    /// as `cargo nextest` does.
+    pub run_dir_suffix: Option<String>,
     /// bindgen: write the hierarchy here instead of running tests.
     pub dump: Option<PathBuf>,
     pub out: Option<PathBuf>,
@@ -92,6 +96,7 @@ impl Opts {
             cov_threshold: None,
             update_golden: false,
             shuffle: false,
+            run_dir_suffix: None,
             dump: None,
             out: None,
             manifest: std::env::var("RIVET_MANIFEST").ok().filter(|s| !s.is_empty()).map(PathBuf::from),
@@ -716,28 +721,33 @@ fn list_tests(
 
 /// One run (one parameter set): serial or sharded across `opts.jobs`.
 /// Returns the results, the time precision, and the coverage files.
+/// Run the tests of one parameter set. `sim_dir` holds the build (the
+/// simulator's own libraries and object files); `out_dir` receives results,
+/// coverage, logs and waveforms, and is the same directory unless several
+/// processes share one build.
 fn run_set(
     launch: &Launch,
     opts: &Opts,
     m: &Manifest,
     pkg: &Package,
     sim_dir: &Path,
+    out_dir: &Path,
 ) -> Result<(Vec<TestResult>, i32, Vec<PathBuf>), String> {
     if opts.jobs <= 1 {
-        let mut cmd = sim_command(launch, opts, m, sim_dir, sim_dir);
-        common_env(&mut cmd, opts, m, pkg, sim_dir, sim_dir);
-        let _ = std::fs::remove_file(sim_dir.join("results.json"));
-        let _ = std::fs::remove_file(sim_dir.join("coverage.json"));
+        let mut cmd = sim_command(launch, opts, m, sim_dir, out_dir);
+        common_env(&mut cmd, opts, m, pkg, sim_dir, out_dir);
+        let _ = std::fs::remove_file(out_dir.join("results.json"));
+        let _ = std::fs::remove_file(out_dir.join("coverage.json"));
         run_sim(cmd, opts)?;
-        let json = sim_dir.join("results.json");
+        let json = out_dir.join("results.json");
         if !json.exists() {
             return Err(format!(
                 "simulator produced no {}; it probably died before the harness finished",
-                sim_dir.join("results.xml").display()
+                out_dir.join("results.xml").display()
             ));
         }
         let (results, precision, _) = read_results_json(&json)?;
-        let cov = sim_dir.join("coverage.json");
+        let cov = out_dir.join("coverage.json");
         return Ok((results, precision, if cov.exists() { vec![cov] } else { vec![] }));
     }
     let names = list_tests(launch, opts, m, pkg, sim_dir)?;
@@ -745,7 +755,7 @@ fn run_set(
     eprintln!("rivet: {} test(s) in {} shard(s)", names.len(), shards.len());
     let mut children = Vec::new();
     for (i, group) in shards.iter().enumerate() {
-        let run_dir = sim_dir.join(format!("shard{i}"));
+        let run_dir = out_dir.join(format!("shard{i}"));
         std::fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(run_dir.join("results.json"));
         let _ = std::fs::remove_file(run_dir.join("coverage.json"));
@@ -790,11 +800,60 @@ fn run_set(
 }
 
 /// Run `build`, `run`, or a `bindgen` dump according to `opts`.
+/// A lock held while the design is built, so several harness processes
+/// (one per test, as `cargo nextest` runs them) do not build into the same
+/// directory at once.
+struct BuildLock(PathBuf);
+
+impl BuildLock {
+    fn acquire(dir: &Path) -> BuildLock {
+        let path = dir.join(".rivet-build.lock");
+        let start = std::time::Instant::now();
+        loop {
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let _ = writeln!(f, "{}", std::process::id());
+                    return BuildLock(path);
+                }
+                Err(_) => {
+                    // Take over a lock left behind by a process that died.
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .map(|t| t.elapsed().map(|e| e.as_secs() > 900).unwrap_or(false))
+                        .unwrap_or(false);
+                    if stale || start.elapsed().as_secs() > 900 {
+                        let _ = std::fs::remove_file(&path);
+                        continue;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for BuildLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 pub fn run(opts: &Opts) -> Result<ExitCode, String> {
     let pkg = cargo_metadata(&opts.dir, opts.package.as_deref())?;
     let m = load_manifest(&pkg, opts)?;
     let base_dir = pkg.manifest_dir.join("sim_build").join(&opts.sim);
     std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
+    // Where this run's results land. The build stays in `base_dir` so
+    // processes running one test each share it.
+    let out_base = match &opts.run_dir_suffix {
+        Some(suffix) => {
+            let d = base_dir.join(suffix);
+            std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+            d
+        }
+        None => base_dir.clone(),
+    };
     let build_only = opts.cmd == "build";
     let sets: Vec<Option<String>> = match &opts.param_set {
         Some(s) => {
@@ -826,7 +885,7 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
     let mut all: Vec<TestResult> = Vec::new();
     let mut precision = -12;
     let mut cov_files = Vec::new();
-    let _ = std::fs::remove_file(base_dir.join("results.xml"));
+    let _ = std::fs::remove_file(out_base.join("results.xml"));
     for set in &sets {
         let sim_dir = match set {
             Some(s) => base_dir.join(s),
@@ -837,7 +896,10 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
         if let Some(s) = set {
             eprintln!("rivet: parameter set {s}: {:?}", m.params_for(Some(s)));
         }
-        let launch = build_one(&pkg, &m, &set_opts, &sim_dir, set.as_deref())?;
+        let launch = {
+            let _lock = BuildLock::acquire(&base_dir);
+            build_one(&pkg, &m, &set_opts, &sim_dir, set.as_deref())?
+        };
         if build_only {
             continue;
         }
@@ -847,7 +909,18 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
             run_sim(cmd, opts)?;
             continue;
         }
-        let (mut results, p, cov) = run_set(&launch, &set_opts, &m, &pkg, &sim_dir)?;
+        // Results and logs go in their own directory when several processes
+        // share one build.
+        let out_dir = match set {
+            Some(s) if opts.run_dir_suffix.is_some() => {
+                let d = out_base.join(s);
+                std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+                d
+            }
+            _ if opts.run_dir_suffix.is_some() => out_base.clone(),
+            _ => sim_dir.clone(),
+        };
+        let (mut results, p, cov) = run_set(&launch, &set_opts, &m, &pkg, &sim_dir, &out_dir)?;
         if let Some(s) = set {
             for r in &mut results {
                 r.name = format!("{}@{s}", r.name);
@@ -884,7 +957,7 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
         eprintln!("rivet: wrote {}", out.display());
         return Ok(ExitCode::SUCCESS);
     }
-    let results_path = base_dir.join("results.xml");
+    let results_path = out_base.join("results.xml");
     if multi || opts.jobs > 1 {
         // Merged results for the whole run.
         write_results_xml_with(&results_path, &all, &opts.sim, precision).map_err(|e| e.to_string())?;
@@ -898,13 +971,13 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
     if failures > 0 {
         code = ExitCode::from(1);
     }
-    let _ = std::fs::remove_file(base_dir.join("coverage.json"));
+    let _ = std::fs::remove_file(out_base.join("coverage.json"));
     if !cov_files.is_empty() {
         let mut report = cov::Report::default();
         for f in &cov_files {
             report.merge_file(f)?;
         }
-        let merged = base_dir.join("coverage.json");
+        let merged = out_base.join("coverage.json");
         if cov_files.len() > 1 || cov_files[0] != merged {
             std::fs::write(&merged, report.to_json()).map_err(|e| e.to_string())?;
             eprintln!("rivet: merged coverage");
@@ -1074,6 +1147,13 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
     let mut skips: Vec<String> = Vec::new();
     let mut exact = false;
     let mut json = false;
+    // `--list --format terse` must print only `name: test` lines: that is
+    // what libtest does, and what `cargo nextest` parses.
+    let mut terse = false;
+    // libtest lists ignored tests separately, and `cargo nextest` asks for
+    // that list to work out which tests to skip. Rivet has no ignored
+    // tests: `skip` is decided by the harness and reported as a skip.
+    let mut only_ignored = false;
     let mut jobs = 1usize;
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -1084,7 +1164,8 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
                     skips.push(s);
                 }
             }
-            "--nocapture" | "--ignored" | "--include-ignored" | "--show-output" | "-q" | "--quiet" => {}
+            "--ignored" => only_ignored = true,
+            "--nocapture" | "--include-ignored" | "--show-output" | "-q" | "--quiet" => {}
             "--test-threads" => {
                 jobs = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
             }
@@ -1092,9 +1173,14 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
                 args.next();
             }
             "--format" => {
-                json = args.next().as_deref() == Some("json");
+                let f = args.next();
+                json = f.as_deref() == Some("json");
+                terse = f.as_deref() == Some("terse");
             }
-            s if s.starts_with("--format=") => json = s == "--format=json",
+            s if s.starts_with("--format=") => {
+                json = s == "--format=json";
+                terse = s == "--format=terse";
+            }
             s if s.starts_with("--test-threads=") => {
                 jobs = s["--test-threads=".len()..].parse().unwrap_or(1);
             }
@@ -1105,13 +1191,15 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
             s => filters.push(s.to_string()),
         }
     }
-    let selected = select_tests(&tests, &filters, &skips, exact);
+    let selected = if only_ignored { Vec::new() } else { select_tests(&tests, &filters, &skips, exact) };
     if list {
         for (module, name) in &selected {
             println!("{module}::{name}: test");
         }
-        println!();
-        println!("{} tests, 0 benchmarks", selected.len());
+        if !terse {
+            println!();
+            println!("{} tests, 0 benchmarks", selected.len());
+        }
         return ExitCode::SUCCESS;
     }
     if selected.is_empty() {
@@ -1125,12 +1213,24 @@ pub fn harness_main(tests: Vec<(String, String)>) -> ExitCode {
     let mut opts = Opts::new("run", dir);
     opts.package = std::env::var("CARGO_PKG_NAME").ok();
     opts.filter = Some(selected.iter().map(|(m, n)| format!("{m}::{n}")).collect::<Vec<_>>().join(","));
+    // `cargo nextest` runs one test per process, several at a time. Give
+    // each its own results directory; the build is shared and locked.
+    if selected.len() == 1 && tests.len() > 1 {
+        let (module, name) = selected[0];
+        let safe: String =
+            format!("{module}__{name}").chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        opts.run_dir_suffix = Some(format!("one/{safe}"));
+    }
     opts.release = std::env::var("PROFILE").map(|p| p == "release").unwrap_or(false) || cfg!(not(debug_assertions));
     opts.jobs = std::env::var("RIVET_JOBS").ok().and_then(|j| j.parse().ok()).unwrap_or(jobs);
     println!("\nrunning {} tests on {}", selected.len(), opts.sim);
     let started = std::time::Instant::now();
     let result = run(&opts);
-    let results_path = opts.dir.join("sim_build").join(&opts.sim).join("results.xml");
+    let mut results_path = opts.dir.join("sim_build").join(&opts.sim);
+    if let Some(suffix) = &opts.run_dir_suffix {
+        results_path = results_path.join(suffix);
+    }
+    let results_path = results_path.join("results.xml");
     let (passed, failed) = match results_summary(&results_path) {
         Some((t, f, s)) => (t - f - s, f),
         None => (0, selected.len()),

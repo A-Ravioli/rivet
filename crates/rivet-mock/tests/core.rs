@@ -341,3 +341,35 @@ fn hierarchy_paths() {
     })
     .unwrap();
 }
+
+#[test]
+fn slices_read_and_write_bit_ranges() {
+    let mut d = Design::new("top").precision(-9);
+    let x = d.logic("x", 16);
+    d.init(x, LogicVec::from_u64(16, 0xabcd));
+    run_test(d, |dut| async move {
+        let x = dut.signal("x")?;
+        // Reading a range.
+        assert_eq!(x.slice(15, 12).get_u64()?, 0xa);
+        assert_eq!(x.slice(7, 0).get_u64()?, 0xcd);
+        assert_eq!(x.slice(3, 3).get_u64()?, 1);
+        assert_eq!(x.slice(7, 0).width(), 8);
+        assert_eq!(x.slice(7, 4).path(), "top.x[7:4]");
+
+        // Writing a range leaves the rest alone, and two writes in one
+        // phase compose instead of the second dropping the first.
+        x.slice(7, 0).set(0x12);
+        x.slice(15, 8).set(0x34);
+        Timer::steps(1).await;
+        assert_eq!(x.get_u64()?, 0x3412);
+
+        // A slice write after a whole-signal write in the same phase starts
+        // from the buffered value.
+        x.set(0xffffu64);
+        x.slice(11, 8).set(0x0);
+        Timer::steps(1).await;
+        assert_eq!(x.get_u64()?, 0xf0ff);
+        Ok(())
+    })
+    .unwrap();
+}

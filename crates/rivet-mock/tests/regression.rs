@@ -57,6 +57,15 @@ fn design() -> Design {
     d
 }
 
+/// The same design with a free-running clock, for the fixture test.
+fn clocked_design() -> Design {
+    let mut d = design();
+    let clk = d.logic("clk", 1);
+    d.init(clk, rivet_core::LogicVec::from_u64(1, 0));
+    d.clock(clk, 5, 0);
+    d
+}
+
 #[test]
 fn full_regression_outcomes_and_order() {
     // Scoped to this test's own modules with a regular expression, so
@@ -293,4 +302,55 @@ fn results_xml_carries_the_source_location() {
     assert!(xml.contains(r#"file="crates/rivet-mock/tests/regression.rs""#), "{xml}");
     assert!(!xml.contains(r#"lineno="0""#), "{xml}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures: shared setup, resolved by argument name, torn down by Drop.
+
+/// Records teardown order so the test below can assert it happened.
+static TORN_DOWN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct Bench {
+    clk: rivet_core::Signal,
+}
+
+impl Drop for Bench {
+    fn drop(&mut self) {
+        TORN_DOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl rivet_core::fixture::Fixture<Bench> for Bench {
+    fn into_result(self) -> rivet_core::Result<Bench> {
+        Ok(self)
+    }
+}
+
+async fn bench(dut: Module) -> rivet_core::Result<Bench> {
+    let clk = dut.signal("clk")?;
+    // Two cycles of "reset" before the test body starts.
+    clk.rising_edge().await;
+    clk.rising_edge().await;
+    Ok(Bench { clk })
+}
+
+inventory::submit! {
+    TestDesc { name: "uses_fixture", module: "fixtures", run: |dut: Module| boxed(async move {
+        let b = rivet_core::fixture::acquire(bench(dut)).await?;
+        // The fixture already consumed two edges.
+        b.clk.rising_edge().await;
+        Ok(())
+    }), ..TestDesc::DEFAULT }
+}
+
+#[test]
+fn fixture_runs_setup_and_drops_afterwards() {
+    TORN_DOWN.store(0, std::sync::atomic::Ordering::Relaxed);
+    let results = rivet_mock::run_regression(clocked_design(), all_tests(), Some("fixtures::"));
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].outcome, Outcome::Passed);
+    assert_eq!(TORN_DOWN.load(std::sync::atomic::Ordering::Relaxed), 1, "the fixture was dropped when the test ended");
+    // Three rising edges in total: two in the fixture, one in the body, on
+    // a clock with a 10ns period starting low.
+    assert_eq!(results[0].sim_time_steps, 20);
 }

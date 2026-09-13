@@ -1,0 +1,25 @@
+# `cargo nextest` runs each test in its own process. A Rivet test crate's
+# `sim` binary starts a simulator per process, so the tests are slower and
+# heavier than ordinary unit tests: the settings below keep a machine from
+# starting dozens of simulators at once and give each one room to finish.
+
+[profile.default]
+# A simulator build on a cold cache takes a while; warn, do not kill.
+slow-timeout = { period = "60s", terminate-after = 20 }
+# Simulator flakiness should be diagnosed, not retried away.
+retries = 0
+failure-output = "immediate-final"
+
+[test-groups]
+# Every process in this group builds or runs a simulator.
+simulator = { max-threads = 4 }
+
+[[profile.default.overrides]]
+filter = 'binary(sim) or binary(cli)'
+test-group = 'simulator'
+
+[profile.ci]
+slow-timeout = { period = "120s", terminate-after = 20 }
+fail-fast = false
+failure-output = "immediate-final"
+status-level = "fail"

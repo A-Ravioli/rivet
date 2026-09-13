@@ -35,6 +35,11 @@ jobs:
         run: |
           cargo test -p example-dff -- --list
           cargo test -p example-dff
+      - name: cargo nextest lists and runs the same tests
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+          cargo nextest list -p example-dff
+          cargo nextest run -p example-dff --profile ci
       - name: fifo example (kit) on Icarus and Verilator
         run: |
           target/debug/rivet run --sim icarus -C examples/fifo

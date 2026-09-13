@@ -179,7 +179,68 @@ fn split_indices(seg: &str) -> Result<(&str, Vec<i64>)> {
     Ok((name, idx))
 }
 
+/// A bit range of a signal, from [`Signal::slice`]. Reads and writes go
+/// through the whole vector, so it works on every backend, including those
+/// whose procedural interface has no part-select.
+#[derive(Clone, Debug)]
+pub struct Slice {
+    sig: Signal,
+    hi: u32,
+    lo: u32,
+}
+
+impl Slice {
+    pub fn width(&self) -> u32 {
+        self.hi - self.lo + 1
+    }
+
+    pub fn path(&self) -> String {
+        format!("{}[{}:{}]", self.sig.path(), self.hi, self.lo)
+    }
+
+    /// The bits, as a vector of this slice's width.
+    pub fn get(&self) -> LogicVec {
+        self.sig.get().slice(self.hi, self.lo)
+    }
+
+    pub fn get_u64(&self) -> std::result::Result<u64, Unresolved> {
+        self.get().to_u64()
+    }
+
+    pub fn get_u64_lossy(&self) -> u64 {
+        self.get().to_u64_lossy()
+    }
+
+    /// Write these bits, leaving the rest of the signal alone.
+    pub fn set(&self, value: impl IntoLogicVec) {
+        let width = self.width();
+        let v = value.into_logic_vec(width);
+        // Start from a write already buffered this time step, so successive
+        // slice writes compose.
+        let mut whole = match runtime::pending_write(self.sig.handle()) {
+            Some(crate::backend::OwnedValue::Vec(v)) => v,
+            _ => self.sig.get(),
+        };
+        for i in 0..width {
+            whole.set_bit(self.lo + i, v.bit(i));
+        }
+        self.sig.set(whole);
+    }
+}
+
 impl Signal {
+    /// A view of bits `hi` down to `lo`, inclusive.
+    ///
+    /// ```ignore
+    /// dut.signal("ctrl")?.slice(7, 4).set(0b1010);
+    /// ```
+    pub fn slice(&self, hi: u32, lo: u32) -> Slice {
+        assert!(hi >= lo, "slice {hi}:{lo} of {} is inverted", self.path());
+        let w = self.width();
+        assert!(hi < w.max(1), "slice {hi}:{lo} is outside {} ({w} bits)", self.path());
+        Slice { sig: *self, hi, lo }
+    }
+
     pub fn from_handle(h: Handle) -> Signal {
         Signal { h }
     }

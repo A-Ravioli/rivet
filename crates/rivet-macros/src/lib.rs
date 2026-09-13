@@ -172,23 +172,50 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
             .collect(),
         None => vec![(name_str.clone(), None)],
     };
-    if args.params.is_some() && func.sig.inputs.len() != 2 {
-        return syn::Error::new_spanned(&func.sig, "a test with `params` takes two arguments: (dut, param)")
+    // Arguments after the dut (and after the `params` value) are fixtures:
+    // each is produced by calling an `#[rivet::fixture]` function of the
+    // same name with the dut.
+    let fixture_from = if args.params.is_some() { 2 } else { 1 };
+    if args.params.is_some() && func.sig.inputs.len() < 2 {
+        return syn::Error::new_spanned(&func.sig, "a test with `params` takes at least two arguments: (dut, param)")
             .to_compile_error()
             .into();
     }
+    let mut fixtures: Vec<Ident> = Vec::new();
+    for arg in func.sig.inputs.iter().skip(fixture_from) {
+        match arg {
+            syn::FnArg::Typed(pt) => match &*pt.pat {
+                syn::Pat::Ident(id) => fixtures.push(id.ident.clone()),
+                other => {
+                    return syn::Error::new_spanned(other, "a fixture argument must be a plain name")
+                        .to_compile_error()
+                        .into()
+                }
+            },
+            other => {
+                return syn::Error::new_spanned(other, "unexpected argument").to_compile_error().into();
+            }
+        }
+    }
+    let fixture_lets = fixtures.iter().map(|f| {
+        quote! { let #f = ::rivet::fixture::acquire(#f(dut.clone())).await?; }
+    });
+    let fixture_lets: Vec<_> = fixture_lets.collect();
+    let fixture_args = &fixtures;
     let registrations = variants.iter().map(|(vname, param)| {
         let call = match (&dut_ty, param) {
             (Some(ty), Some(p)) => quote! {
                 async move {
                     let dut = <#ty as ::rivet::Bind>::bind(dut)?;
-                    #name(dut, #p).await
+                    #(#fixture_lets)*
+                    #name(dut, #p #(, #fixture_args)*).await
                 }
             },
             (Some(ty), None) => quote! {
                 async move {
                     let dut = <#ty as ::rivet::Bind>::bind(dut)?;
-                    #name(dut).await
+                    #(#fixture_lets)*
+                    #name(dut #(, #fixture_args)*).await
                 }
             },
             (None, _) => quote! { #name() },
@@ -233,6 +260,39 @@ pub fn derive_randomize(item: TokenStream) -> TokenStream {
         Ok(ts) => ts.into(),
         Err(e) => e.to_compile_error().into(),
     }
+}
+
+/// Mark an async function as a fixture: setup shared between tests.
+///
+/// ```ignore
+/// #[rivet::fixture]
+/// async fn clocked(dut: Module) -> rivet::Result<Signal> {
+///     let clk = dut.signal("clk")?;
+///     rivet::Clock::start(clk, 10.ns());
+///     reset(&dut, clk).await?;
+///     Ok(clk)
+/// }
+///
+/// #[rivet::test]
+/// async fn counts(dut: Module, clocked: Signal) -> rivet::Result<()> { ... }
+/// ```
+///
+/// A test argument after the dut (and after a `params` value) is resolved by
+/// calling the fixture of the same name with the dut. A fixture may return
+/// the value directly or a `Result`; teardown is the value's `Drop`, which
+/// runs when the test ends.
+#[proc_macro_attribute]
+pub fn fixture(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let func = parse_macro_input!(item as ItemFn);
+    if func.sig.asyncness.is_none() {
+        return syn::Error::new_spanned(&func.sig, "#[rivet::fixture] functions must be `async fn`")
+            .to_compile_error()
+            .into();
+    }
+    if func.sig.inputs.len() != 1 {
+        return syn::Error::new_spanned(&func.sig, "a fixture takes one argument: the dut").to_compile_error().into();
+    }
+    quote! { #func }.into()
 }
 
 #[cfg(test)]
