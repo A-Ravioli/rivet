@@ -1063,6 +1063,14 @@ impl Backend for VhpiBackend {
         Ok(())
     }
 
+    fn enum_literals(&mut self, h: Handle) -> Option<Vec<String>> {
+        let e = &self.entries[h.0 as usize];
+        match (&e.map, e.info.kind) {
+            (Some(m), ObjKind::Enum) | (Some(m), ObjKind::Logic) if !m.literals.is_empty() => Some(m.literals.clone()),
+            _ => None,
+        }
+    }
+
     fn finish(&mut self) {
         unsafe { vhpi_control(vhpiFinish, 0) };
     }

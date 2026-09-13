@@ -49,6 +49,29 @@ async fn clock_and_reset_drive_internal_signals(dut: Module) -> rivet::Result<()
     Ok(())
 }
 
+/// Enumeration literals: a VHDL tool reports them, so a test can say what
+/// a value means rather than which position it holds.
+#[rivet::test(timeout = 100.us())]
+async fn enum_literals_have_names(dut: Module) -> rivet::Result<()> {
+    let clk = dut.signal("clk")?;
+    let _clock = Clock::start(clk, 10.ns());
+    reset(&dut, clk).await?;
+    let cmd = need_records(&dut)?;
+    let op = cmd.signal("op")?;
+    let Some(lits) = op.enum_literals() else {
+        return Err(rivet::skip("this simulator does not report enumeration literals"));
+    };
+    assert_eq!(lits, ["OP_NOP", "OP_ADD", "OP_SUB", "OP_XOR"], "op_t literals in order");
+    op.set(2u64);
+    clk.rising_edge().await;
+    read_only().await;
+    assert_eq!(op.enum_name().as_deref(), Some("OP_SUB"));
+    // The design's own signal follows it a cycle later.
+    let last = dut.module("dut")?.signal("last_op")?;
+    assert_eq!(last.enum_name().as_deref(), Some("OP_SUB"), "the ALU registered the operation");
+    Ok(())
+}
+
 #[rivet::test(timeout = 100.us())]
 async fn record_members_are_addressable(dut: Module) -> rivet::Result<()> {
     let clk = dut.signal("clk")?;

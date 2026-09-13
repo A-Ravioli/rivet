@@ -195,6 +195,13 @@ pub trait Backend {
     fn register(&mut self, kind: CbKind) -> Result<CbId>;
     fn remove(&mut self, id: CbId) -> Result<()>;
 
+    /// The literal names of an enumeration object, in position order, when
+    /// the simulator reports them. VHDL tools do; the Verilog tools Rivet
+    /// runs on do not, so this is `None` there.
+    fn enum_literals(&mut self, _h: Handle) -> Option<Vec<String>> {
+        None
+    }
+
     /// End the simulation.
     fn finish(&mut self);
 

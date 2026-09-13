@@ -369,6 +369,11 @@ fn vpi_type_name(t: i32) -> String {
 
 /// Relationship types tried, in order, when enumerating a scope's children.
 /// Mirrors cocotb's `VpiIterator` tables minus the entries it disables.
+/// Struct and union members (cocotb iterates `vpiMember`). Icarus and
+/// Verilator report neither, which is why `bindgen` decodes packed structs
+/// from the vector instead.
+const STRUCT_CHILDREN: &[i32] = &[vpiMember];
+
 const MODULE_CHILDREN: &[i32] = &[
     vpiNet,
     vpiNetArray,
@@ -636,7 +641,13 @@ impl Backend for VpiBackend {
         let ppath = self.entries[parent.0 as usize].info.path.clone();
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for &rel in MODULE_CHILDREN {
+        // A struct's children are its members, not a scope's declarations.
+        let rels: &[i32] = if self.entries[parent.0 as usize].info.kind == ObjKind::Struct {
+            STRUCT_CHILDREN
+        } else {
+            MODULE_CHILDREN
+        };
+        for &rel in rels {
             let it = unsafe { vpi_iterate(rel, praw) };
             if it.is_null() {
                 continue;

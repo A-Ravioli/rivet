@@ -310,6 +310,21 @@ impl Signal {
         Ok(self.get_u64()? != 0)
     }
 
+    /// The literal names of this object's enumeration type, in position
+    /// order, when the simulator reports them (VHDL does, Verilog does
+    /// not).
+    pub fn enum_literals(&self) -> Option<Vec<String>> {
+        runtime::with(|rt| rt.backend.enum_literals(self.h))
+    }
+
+    /// The name of the current value's enumeration literal, for example
+    /// `"OP_ADD"` or `"'1'"`.
+    pub fn enum_name(&self) -> Option<String> {
+        let lits = self.enum_literals()?;
+        let pos = self.get().to_u64().ok()? as usize;
+        lits.get(pos).cloned()
+    }
+
     /// Read a real-valued object.
     pub fn get_real(&self) -> f64 {
         match self.read_raw() {

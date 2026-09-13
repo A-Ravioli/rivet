@@ -58,6 +58,8 @@ pub const vpiInternalScope: i32 = 92;
 pub const vpiScope: i32 = 84;
 pub const vpiVariables: i32 = 100;
 pub const vpiInstance: i32 = 745;
+/// Members of a struct or union variable (IEEE 1800 Annex B).
+pub const vpiMember: i32 = 742;
 
 // Properties
 pub const vpiUndefined: i32 = -1;

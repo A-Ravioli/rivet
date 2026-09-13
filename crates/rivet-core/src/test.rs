@@ -584,10 +584,23 @@ pub fn dump_hierarchy(root: Module, path: &std::path::Path) -> std::io::Result<(
             }
         } else if info.kind == crate::backend::ObjKind::Array {
             // Element kind and width from the first element, if reachable.
+            // An element that is itself an array carries its own range, so
+            // bindgen can emit the inner dimension too.
             if let Ok(sig) = obj.as_signal() {
                 if let Ok(e) = sig.index(info.range.map(|(l, r)| l.min(r)).unwrap_or(0)) {
                     let ei = e.info();
-                    let _ = write!(out, ", \"element\": {{\"kind\": \"{:?}\", \"width\": {}}}", ei.kind, ei.width);
+                    let _ = write!(out, ", \"element\": {{\"kind\": \"{:?}\", \"width\": {}", ei.kind, ei.width);
+                    if ei.kind == crate::backend::ObjKind::Array {
+                        if let Some((l, r)) = ei.range {
+                            let _ = write!(out, ", \"range\": [{l}, {r}]");
+                        }
+                        if let Ok(inner) = e.index(ei.range.map(|(l, r)| l.min(r)).unwrap_or(0)) {
+                            let ii = inner.info();
+                            let _ =
+                                write!(out, ", \"element\": {{\"kind\": \"{:?}\", \"width\": {}}}", ii.kind, ii.width);
+                        }
+                    }
+                    let _ = write!(out, "}}");
                 }
             }
             if let Some((l, r)) = info.range {

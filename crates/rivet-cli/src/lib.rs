@@ -588,7 +588,17 @@ fn common_env(cmd: &mut Command, opts: &Opts, m: &Manifest, pkg: &Package, sim_d
         cmd.env("RIVET_WAVES", "1");
     }
     if let Some(d) = &opts.dump {
-        cmd.env("RIVET_DUMP_HIERARCHY", d);
+        // Absolute: the simulator may run with its own working directory
+        // (Verilator runs in the output directory).
+        let abs = if d.is_absolute() {
+            d.clone()
+        } else {
+            std::env::current_dir().map(|c| c.join(d)).unwrap_or_else(|_| d.clone())
+        };
+        if let Some(parent) = abs.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        cmd.env("RIVET_DUMP_HIERARCHY", abs);
     }
 }
 
@@ -1085,7 +1095,8 @@ pub fn main_with_args(args: impl IntoIterator<Item = String>) -> ExitCode {
         "run" | "build" => run(&opts),
         "watch" => watch(&opts),
         "bindgen" => {
-            opts.dump = Some(opts.dir.join("sim_build").join(&opts.sim).join("hierarchy.json"));
+            let base = std::fs::canonicalize(&opts.dir).unwrap_or_else(|_| opts.dir.clone());
+            opts.dump = Some(base.join("sim_build").join(&opts.sim).join("hierarchy.json"));
             run(&opts)
         }
         "cov" => match opts.sub.as_str() {

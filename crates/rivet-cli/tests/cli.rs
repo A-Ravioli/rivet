@@ -281,7 +281,7 @@ fn nvc_vhdl_types_through_vhpi() {
     // VHPI: records, enumerations, a for-generate and a boolean.
     let (code, text) = run(&["run", "--sim", "nvc", "-C", "examples/vhdl_types"]);
     assert_eq!(code, 0, "{text}");
-    assert!(text.contains("RIVET_RESULT passed=4 failed=0"), "{text}");
+    assert!(text.contains("RIVET_RESULT passed=5 failed=0"), "{text}");
     let xml = results("vhdl_types", "nvc");
     assert!(xml.contains(r#"<testcase name="record_members_are_addressable""#), "{xml}");
 }
@@ -297,5 +297,5 @@ fn ghdl_vhdl_types_skips_what_it_cannot_see() {
     // tests that need them skip instead of failing.
     let (code, text) = run(&["run", "--sim", "ghdl", "-C", "examples/vhdl_types"]);
     assert_eq!(code, 0, "{text}");
-    assert!(text.contains("RIVET_RESULT passed=2 failed=0 skipped=3"), "{text}");
+    assert!(text.contains("RIVET_RESULT passed=2 failed=0 skipped=4"), "{text}");
 }

@@ -89,16 +89,31 @@ impl Gen {
                     binds.push(format!("            {f}: module.module({name:?})?,"));
                 }
                 "Array" => {
-                    let (lo, hi) = match c.get("range").and_then(Value::as_array) {
+                    let bounds = |v: &Value, width_key: &Value| match v.get("range").and_then(Value::as_array) {
                         Some(r) if r.len() == 2 => {
                             let a = r[0].as_i64().unwrap_or(0);
                             let b = r[1].as_i64().unwrap_or(0);
                             (a.min(b), a.max(b))
                         }
-                        _ => (0, c["width"].as_i64().unwrap_or(0) - 1),
+                        _ => (0, width_key.as_i64().unwrap_or(0) - 1),
                     };
-                    fields.push(format!("    /// `{name}` [{lo}..={hi}]\n    pub {f}: Vec<Signal>,"));
-                    binds.push(format!("            {f}: bind_array(&module, {name:?}, {lo}, {hi})?,"));
+                    let (lo, hi) = bounds(c, &c["width"]);
+                    let elem = c.get("element");
+                    let inner_is_array = elem.map(|e| e["kind"] == "Array").unwrap_or(false);
+                    if inner_is_array {
+                        // A second dimension: `mem[i][j]`.
+                        let e = elem.unwrap();
+                        let (ilo, ihi) = bounds(e, &e["width"]);
+                        fields.push(format!(
+                            "    /// `{name}` [{lo}..={hi}][{ilo}..={ihi}]\n    pub {f}: Vec<Vec<Signal>>,"
+                        ));
+                        binds.push(format!(
+                            "            {f}: bind_array_2d(&module, {name:?}, {lo}, {hi}, {ilo}, {ihi})?,"
+                        ));
+                    } else {
+                        fields.push(format!("    /// `{name}` [{lo}..={hi}]\n    pub {f}: Vec<Signal>,"));
+                        binds.push(format!("            {f}: bind_array(&module, {name:?}, {lo}, {hi})?,"));
+                    }
                 }
                 "Unknown" => {}
                 _ if in_generate && c["is_const"].as_bool().unwrap_or(false) => {}
@@ -147,6 +162,22 @@ pub fn generate(json: &str, top_type: Option<&str>, sources: &[std::path::PathBu
                  return Err(rivet::Error::Msg(format!(\n            \"{}: expected width {width}, design has {}; regenerate bindings\",\n            s.path(),\n            s.width()\n        )));\n    \
              }\n    \
              Ok(s)\n\
+         }\n\n\
+         fn bind_array_2d(\n    \
+         \x20   m: &Module,\n    \
+         \x20   name: &str,\n    \
+         \x20   lo: i64,\n    \
+         \x20   hi: i64,\n    \
+         \x20   ilo: i64,\n    \
+         \x20   ihi: i64,\n    \
+         ) -> Result<Vec<Vec<Signal>>> {\n    \
+         \x20   let a = m.signal(name)?;\n    \
+         \x20   (lo..=hi)\n    \
+         \x20       .map(|i| {\n    \
+         \x20           let row = a.index(i)?;\n    \
+         \x20           (ilo..=ihi).map(|j| row.index(j)).collect::<Result<Vec<Signal>>>()\n    \
+         \x20       })\n    \
+         \x20       .collect()\n    \
          }\n\n\
          fn bind_array(m: &Module, name: &str, lo: i64, hi: i64) -> Result<Vec<Signal>> {\n    \
              let a = m.signal(name)?;\n    \
@@ -200,6 +231,7 @@ mod tests {
   {"name": "type", "path": "top.type", "kind": "LogicVec", "width": 8, "is_const": false, "signed": true, "type": "reg"},
   {"name": "1bad", "path": "top.1bad", "kind": "Real", "width": 64, "is_const": false, "signed": false, "type": "real"},
   {"name": "mem", "path": "top.mem", "kind": "Array", "width": 4, "is_const": false, "signed": false, "type": "reg array", "element": {"kind": "LogicVec", "width": 8}, "range": [3, 0]},
+  {"name": "grid", "path": "top.grid", "kind": "Array", "width": 2, "is_const": false, "signed": false, "type": "reg array", "element": {"kind": "Array", "width": 3, "range": [2, 0], "element": {"kind": "LogicVec", "width": 8}}, "range": [1, 0]},
   {"name": "WIDTH", "path": "top.WIDTH", "kind": "LogicVec", "width": 32, "is_const": true, "signed": false, "type": "parameter"},
   {"name": "u_sub", "path": "top.u_sub", "kind": "Module", "width": 0, "is_const": false, "signed": false, "type": "module", "children": [
     {"name": "x", "path": "top.u_sub.x", "kind": "Integer", "width": 32, "is_const": false, "signed": true, "type": "integer"}
@@ -224,6 +256,9 @@ mod tests {
         assert!(code.contains("pub _1bad: Signal,"), "leading digit gets a prefix");
         assert!(code.contains("pub mem: Vec<Signal>,"));
         assert!(code.contains("bind_array(&module, \"mem\", 0, 3)"));
+        // Two dimensions become a vector of vectors.
+        assert!(code.contains("pub grid: Vec<Vec<Signal>>,"), "{code}");
+        assert!(code.contains("bind_array_2d(&module, \"grid\", 0, 1, 0, 2)"), "{code}");
         assert!(code.contains("pub WIDTH: Signal,"));
         assert!(code.contains("bind_signal(&module, \"WIDTH\", 32)"));
         assert!(code.contains("pub struct Top_u_sub {"));
