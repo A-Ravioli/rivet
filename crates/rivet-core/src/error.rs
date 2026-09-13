@@ -5,6 +5,7 @@ use crate::value::Unresolved;
 use std::fmt;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     Backend(BackendError),
     Unresolved(Unresolved),

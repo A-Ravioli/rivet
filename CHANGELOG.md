@@ -7,6 +7,43 @@ uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 Until 1.0, minor versions may contain breaking changes; they will always be
 listed under "Changed" with the migration in one line.
 
+## Versioning policy
+
+- **Public API.** Everything reachable from the `rivet` facade, plus
+  `rivet-kit` and the `rivet.toml` schema. The CLI's flags and its exit
+  codes are public too: a script that runs `rivet run` is a user.
+- **Not public.** `rivet-core`'s `runtime` internals, the `Backend` trait's
+  exact shape, the FFI crates' bindings, and the on-disk layout of
+  `sim_build`. A backend living outside this repository should expect to
+  track `rivet-core` version for version.
+- **Enums.** Enums a user *reads* — `ObjKind`, `Error`, `BackendError`,
+  `Outcome`, `Phase` — are `#[non_exhaustive]`, so a new variant is not a
+  breaking change; match them with a wildcard arm. Enums a *backend
+  implements against* — `CbKind`, `Action`, `Value`, `WaveCmd` — are
+  deliberately exhaustive, because a backend that silently ignores a new
+  callback kind is worse than one that fails to compile. Adding a variant
+  to those is a breaking change.
+- **MSRV.** Currently 1.87, checked in CI. Raising it is a minor-version
+  change, never a patch.
+- **Simulator support.** Adding a simulator is a minor version. Dropping
+  one, or changing which one `rivet run` picks by default, is breaking.
+
+### What 1.0 requires
+
+1. The conformance suite passing on at least one commercial simulator
+   (Questa, Xcelium or VCS), not just Icarus, Verilator, GHDL and NVC.
+2. `docs/SIMULATOR-QUIRKS.md` with no "code only" rows for a supported
+   simulator: every workaround Rivet carries has been observed, not
+   inferred from cocotb.
+3. A mixed-language design running end to end on a real simulator, which
+   means `set_event_tag` in `rivet-vpi` and `rivet-vhpi`.
+4. The nightly soak green for a month, including the ASAN and Valgrind
+   runs of the Icarus flow.
+5. An external review of the `unsafe` in `rivet-vpi`, `rivet-vhpi` and
+   `rivet-verilator`, all of which trust simulator-reported widths.
+6. A real project's testbench ported from cocotb by someone who did not
+   write Rivet, with the friction recorded in `docs/migration.md`.
+
 ## [Unreleased]
 
 ### Added
@@ -36,6 +73,8 @@ listed under "Changed" with the migration in one line.
 ### Changed
 
 - Minimum supported Rust version is 1.87, checked in CI.
+- `ObjKind`, `Error`, `BackendError`, `Outcome` and `Phase` are
+  `#[non_exhaustive]`; match them with a wildcard arm.
 
 ## [0.1.0] - unreleased
 

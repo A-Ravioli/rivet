@@ -19,6 +19,7 @@ pub struct Handle(pub u32);
 
 /// The kind of a design object, mirroring cocotb's `gpi_objtype`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub enum ObjKind {
     /// A module, instance, interface, or scope.
     Module,
@@ -146,6 +147,7 @@ pub struct Capabilities {
 
 /// Errors from the backend.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum BackendError {
     NotFound(String),
     WrongKind { path: String, expected: &'static str, actual: ObjKind },

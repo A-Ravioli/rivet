@@ -20,6 +20,7 @@ use std::task::{Context, Poll, Waker};
 /// Where in the timestep the harness currently is. See
 /// `docs/design/01-architecture.md` §5 and cocotb's timing model.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub enum Phase {
     /// Before the simulation started.
     Startup,
