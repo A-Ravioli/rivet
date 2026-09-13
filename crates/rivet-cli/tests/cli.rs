@@ -270,3 +270,32 @@ fn rivet_new_scaffolds_a_crate_that_runs() {
     assert!(text.contains("RIVET_RESULT passed=2 failed=0"), "{text}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn nvc_vhdl_types_through_vhpi() {
+    let _lock = example_lock("vhdl_types");
+    if !have("nvc") {
+        eprintln!("skipping: nvc not installed");
+        return;
+    }
+    // VHPI: records, enumerations, a for-generate and a boolean.
+    let (code, text) = run(&["run", "--sim", "nvc", "-C", "examples/vhdl_types"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("RIVET_RESULT passed=4 failed=0"), "{text}");
+    let xml = results("vhdl_types", "nvc");
+    assert!(xml.contains(r#"<testcase name="record_members_are_addressable""#), "{xml}");
+}
+
+#[test]
+fn ghdl_vhdl_types_skips_what_it_cannot_see() {
+    let _lock = example_lock("vhdl_types");
+    if !have("ghdl") {
+        eprintln!("skipping: ghdl not installed");
+        return;
+    }
+    // The same tests on GHDL: record members are not exposed there, so the
+    // tests that need them skip instead of failing.
+    let (code, text) = run(&["run", "--sim", "ghdl", "-C", "examples/vhdl_types"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("RIVET_RESULT passed=2 failed=0 skipped=3"), "{text}");
+}

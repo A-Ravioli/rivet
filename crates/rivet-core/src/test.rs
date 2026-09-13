@@ -180,6 +180,7 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
                 Outcome::Passed
             }
             (true, Outcome::Passed) => Outcome::Failed("test passed but was expected to fail".into()),
+            (true, Outcome::Skipped) => Outcome::Skipped,
             (_, o) => o,
         };
         let sim_time_steps = runtime::now() - start;
@@ -211,6 +212,10 @@ async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<(D
     let body = async move {
         match first(handle, TestFailed).await {
             Either::Left(Ok(Ok(()))) => Outcome::Passed,
+            Either::Left(Ok(Err(Error::Skip(why)))) => {
+                log::info!("skipped: {why}");
+                Outcome::Skipped
+            }
             Either::Left(Ok(Err(e))) => Outcome::Failed(e.to_string()),
             Either::Left(Err(e)) => Outcome::Failed(e.to_string()),
             Either::Right(msg) => Outcome::Failed(msg),

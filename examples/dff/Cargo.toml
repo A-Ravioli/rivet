@@ -18,7 +18,7 @@ path = "tests/sim.rs"
 harness = false
 
 [dependencies]
-rivet = { workspace = true, features = ["harness"] }
+rivet = { workspace = true, features = ["harness", "vpi"] }
 log = { workspace = true }
 
 [build-dependencies]

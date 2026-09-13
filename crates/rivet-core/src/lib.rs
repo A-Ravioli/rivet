@@ -25,6 +25,21 @@ pub use backend::{Action, Backend, Capabilities, Handle, ObjInfo, ObjKind, Owned
 pub use clock::Clock;
 pub use coverage::{Bins, CoverPoint, Covergroup, Cross};
 pub use error::{Error, Result};
+
+/// End the current test as skipped rather than failed.
+///
+/// Use it when a test does not apply to the simulator or design in front of
+/// it, for example a record member on a simulator whose interface does not
+/// expose them:
+///
+/// ```ignore
+/// if !dut.has_child("cmd") {
+///     return Err(rivet::skip("this simulator does not expose record members"));
+/// }
+/// ```
+pub fn skip(why: impl Into<String>) -> Error {
+    Error::Skip(why.into())
+}
 pub use executor::WaitOn;
 pub use handle::{Module, Object, Signal};
 pub use random::{rng, Random, Randomize, Rng};

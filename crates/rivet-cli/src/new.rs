@@ -84,9 +84,14 @@ rivet = {rivet_dep}
 rivet-verilator = {vl_dep}
 
 [features]
+default = ["vpi"]
+# One backend per simulator: VPI for Icarus and GHDL, VHPI for NVC. A
+# library carrying both fails to load on NVC, which resolves eagerly.
+vpi = ["rivet/vpi"]
+vhpi = ["rivet/vhpi"]
 verilator = ["rivet/verilator"]
 "#,
-            rivet_dep = dep(", features = [\"harness\"]"),
+            rivet_dep = dep(", default-features = false, features = [\"harness\"]"),
             vl_dep = dep_verilator,
         ),
     )?;
@@ -98,8 +103,8 @@ verilator = ["rivet/verilator"]
 top = "counter"
 sources = ["hdl/counter.sv"]
 
-[design.parameters]
-WIDTH = 8
+[design.params]
+WIDTH = "8"
 
 [sim.icarus]
 args = ["-g2012"]

@@ -1,0 +1,9 @@
+[book]
+title = "Rivet"
+description = "Rivet: a Rust hardware verification harness."
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/A-Ravioli/rivet"
+edit-url-template = "https://github.com/A-Ravioli/rivet/edit/main/docs/book/{path}"

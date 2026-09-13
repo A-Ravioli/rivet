@@ -1,5 +1,5 @@
 [package]
-name = "example-dff-vhdl"
+name = "example-vhdl-types"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -8,8 +8,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# The backend is chosen per simulator: GHDL goes through VPI, NVC through
-# VHPI, and a library that carries both fails to load on NVC.
+# One backend per simulator: GHDL through VPI, NVC through VHPI.
 rivet = { workspace = true, default-features = false }
 log = { workspace = true }
 

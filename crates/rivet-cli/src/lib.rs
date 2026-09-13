@@ -102,7 +102,7 @@ pub fn usage() -> ! {
         "usage: rivet <new|run|build|watch|bindgen|cov|clean> [options] [-- sim args]\n\
          \n\
          options:\n\
-         \x20 --sim <icarus|verilator|ghdl>  simulator (default: icarus)\n\
+         \x20 --sim <icarus|verilator|ghdl|nvc>  simulator (default: icarus)\n\
          \x20 -p, --package <name>       test crate (default: crate in the current directory)\n\
          \x20 -C <dir>                   change to directory first\n\
          \x20 --release                  build the harness in release mode\n\
@@ -383,6 +383,69 @@ fn build_ghdl(m: &Manifest, opts: &Opts, sim_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Analyse and elaborate with NVC. The design runs with `nvc -r`, which
+/// loads the harness through `--load` (VHPI).
+fn build_nvc(m: &Manifest, opts: &Opts, sim_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(sim_dir).map_err(|e| e.to_string())?;
+    let cfg = m.sim("nvc");
+    let sources = m.sources_abs();
+    let mut common: Vec<String> = vec![format!("--work={}", sim_dir.join("work").display())];
+    if !cfg.args.iter().any(|a| a.starts_with("--std")) {
+        common.push("--std=2008".into());
+    }
+    common.extend(cfg.args.iter().cloned());
+    let mut hash_inputs_extra = common.clone();
+    // Generics are elaborated in, so a different parameter set is a
+    // different build.
+    for (k, v) in m.params_for(opts.param_set.as_deref()) {
+        hash_inputs_extra.push(format!("-g{k}={v}"));
+    }
+    let hash = hash_inputs(&sources, &hash_inputs_extra)?;
+    let stamp = sim_dir.join("build.hash");
+    if std::fs::read_to_string(&stamp).ok().as_deref() == Some(&hash.to_string()) {
+        return Ok(());
+    }
+    let mut cmd = Command::new("nvc");
+    cmd.args(&common).arg("-a").args(&sources);
+    run_cmd(cmd, opts.verbose)?;
+    let mut cmd = Command::new("nvc");
+    cmd.args(&common).arg("-e");
+    for (k, v) in m.params_for(opts.param_set.as_deref()) {
+        cmd.arg(format!("-g{k}={v}"));
+    }
+    // The elaborated design is saved into the work library, where `nvc -r`
+    // finds it.
+    cmd.arg(&m.design.top);
+    run_cmd(cmd, opts.verbose)?;
+    std::fs::write(&stamp, hash.to_string()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Build the test crate's `cdylib` with extra cargo features, for backends
+/// the user's crate does not enable by default (VHPI).
+fn cargo_build_features(
+    pkg: &Package,
+    opts: &Opts,
+    features: &[&str],
+    no_default: bool,
+    _set: Option<&str>,
+) -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build").arg("-p").arg(&pkg.name).arg("--lib").current_dir(&pkg.manifest_dir);
+    if opts.release {
+        cmd.arg("--release");
+    }
+    if no_default {
+        // A VHPI simulator does not provide the VPI symbols, and it resolves
+        // the library eagerly, so the cdylib must not carry both backends.
+        cmd.arg("--no-default-features");
+    }
+    if !features.is_empty() {
+        cmd.arg("--features").arg(features.join(","));
+    }
+    run_cmd(cmd, opts.verbose)
+}
+
 fn cargo_build(pkg: &Package, opts: &Opts, verilator: bool, set: Option<&str>) -> Result<(), String> {
     let mut cmd = Command::new("cargo");
     cmd.arg("build").arg("-p").arg(&pkg.name).current_dir(&pkg.manifest_dir);
@@ -469,6 +532,7 @@ pub fn shard(names: &[String], jobs: usize) -> Vec<Vec<String>> {
 enum Launch {
     Icarus { vvp: PathBuf, plugin_dir: PathBuf, lib_name: String },
     Ghdl { so: PathBuf },
+    Nvc { so: PathBuf },
     Verilator { bin: PathBuf },
 }
 
@@ -546,6 +610,23 @@ fn sim_command(launch: &Launch, opts: &Opts, m: &Manifest, sim_dir: &Path, run_d
             cmd.stdin(Stdio::null());
             cmd
         }
+        Launch::Nvc { so } => {
+            let cfg = m.sim("nvc");
+            let mut cmd = Command::new("nvc");
+            cmd.arg(format!("--work={}", sim_dir.join("work").display()));
+            if !cfg.args.iter().any(|a| a.starts_with("--std")) {
+                cmd.arg("--std=2008");
+            }
+            cmd.arg("-r").arg("--load").arg(so);
+            if opts.waves {
+                cmd.arg("--wave").arg(run_dir.join(format!("{}.fst", m.design.top)));
+            }
+            cmd.arg(&m.design.top);
+            cmd.args(cfg.run_args.iter());
+            cmd.args(&opts.extra);
+            cmd.stdin(Stdio::null());
+            cmd
+        }
         Launch::Verilator { bin } => {
             let mut cmd = Command::new(bin);
             if opts.waves {
@@ -577,11 +658,16 @@ fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Opti
             build_ghdl(m, opts, sim_dir)?;
             Ok(Launch::Ghdl { so: pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name)) })
         }
+        "nvc" => {
+            cargo_build_features(pkg, opts, &["vhpi"], true, set)?;
+            build_nvc(m, opts, sim_dir)?;
+            Ok(Launch::Nvc { so: pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name)) })
+        }
         "verilator" => {
             cargo_build(pkg, opts, true, set)?;
             Ok(Launch::Verilator { bin: pkg.target_dir.join(profile).join(pkg.verilator_bin.as_ref().unwrap()) })
         }
-        other => Err(format!("unsupported simulator {other:?} (icarus, verilator, ghdl)")),
+        other => Err(format!("unsupported simulator {other:?} (icarus, verilator, ghdl, nvc)")),
     }
 }
 

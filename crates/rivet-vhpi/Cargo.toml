@@ -1,0 +1,16 @@
+[package]
+name = "rivet-vhpi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VHPI backend for Rivet (NVC, and the VHDL side of the commercial simulators)"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[dependencies]
+rivet-core = { workspace = true }
+log = { workspace = true }

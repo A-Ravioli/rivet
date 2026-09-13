@@ -1,0 +1,10 @@
+[design]
+top = "tb_top"
+language = "vhdl"
+sources = ["hdl/types_pkg.vhd", "hdl/alu.vhd", "hdl/tb_top.vhd"]
+
+[sim.nvc]
+args = ["--std=2008"]
+
+[sim.ghdl]
+args = ["--std=08"]

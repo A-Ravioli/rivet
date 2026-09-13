@@ -72,6 +72,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-vhdl-types"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -148,6 +156,7 @@ dependencies = [
  "rivet-kit",
  "rivet-macros",
  "rivet-verilator",
+ "rivet-vhpi",
  "rivet-vpi",
 ]
 
@@ -214,6 +223,14 @@ dependencies = [
  "rivet-core",
  "rivet-manifest",
  "rivet-vpi",
+]
+
+[[package]]
+name = "rivet-vhpi"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet-core",
 ]
 
 [[package]]

@@ -38,6 +38,9 @@ struct Entry {
     raw: vpiHandle,
     info: ObjInfo,
     children: Option<HashMap<String, Handle>>,
+    /// A generate array the simulator does not expose as an object: the
+    /// handle is the enclosing scope's and elements are found by name.
+    pseudo: bool,
 }
 
 struct CbRec {
@@ -175,7 +178,7 @@ impl VpiBackend {
         }
         let info = self.classify(raw, vtype, name, path.clone());
         let h = Handle(self.entries.len() as u32);
-        self.entries.push(Entry { raw, info, children: None });
+        self.entries.push(Entry { raw, info, children: None, pseudo: false });
         self.by_path.insert(path, h);
         h
     }
@@ -255,6 +258,59 @@ impl VpiBackend {
     /// but its VPI type does not say so (Verilator).
     pub fn mark_const(&mut self, h: Handle) {
         self.entries[h.0 as usize].info.is_const = true;
+    }
+
+    /// Record a generate array the simulator does not expose as an object:
+    /// the entry keeps the enclosing scope's handle and elements are found
+    /// by name on indexing.
+    fn make_pseudo_array(&mut self, parent: Handle, praw: vpiHandle, name: &str, ppath: &str) -> Handle {
+        let path = format!("{ppath}.{name}");
+        if let Some(&h) = self.by_path.get(&path) {
+            return h;
+        }
+        let h = Handle(self.entries.len() as u32);
+        self.entries.push(Entry {
+            raw: praw,
+            info: ObjInfo {
+                kind: ObjKind::GenArray,
+                name: name.to_string(),
+                path: path.clone(),
+                width: 0,
+                is_const: false,
+                signed: false,
+                range: None,
+                type_name: "generate array".into(),
+            },
+            children: None,
+            pseudo: true,
+        });
+        self.by_path.insert(path, h);
+        self.entries[parent.0 as usize].children.get_or_insert_with(HashMap::new).insert(name.to_string(), h);
+        h
+    }
+
+    /// Scan a scope's children for a leaf name, case-insensitively. Used
+    /// where a simulator will not resolve a composed name but does report
+    /// the object through iteration (GHDL's generate elements).
+    fn scan_for(&self, scope: vpiHandle, want: &str) -> Option<vpiHandle> {
+        for &rel in MODULE_CHILDREN {
+            let it = unsafe { vpi_iterate(rel, scope) };
+            if it.is_null() {
+                continue;
+            }
+            loop {
+                let raw = unsafe { vpi_scan(it) };
+                if raw.is_null() {
+                    break;
+                }
+                let name = unsafe { cstr(vpi_get_str(vpiName, raw)) };
+                if name.eq_ignore_ascii_case(want) {
+                    return Some(raw);
+                }
+                unsafe { vpi_free_object(raw) };
+            }
+        }
+        None
     }
 
     fn check_error(&self, what: &str) -> Result<()> {
@@ -451,8 +507,24 @@ impl Backend for VpiBackend {
             // Verilator, Questa): `gen[0]` exists but `gen` does not. Return
             // the parent itself typed as a generate array, resolved by name
             // on indexing, as cocotb does (VpiImpl.cpp:406-452).
-            let probe = CString::new(format!("{ppath}.{name}[0]")).unwrap();
-            let p = unsafe { vpi_handle_by_name(probe.as_ptr(), std::ptr::null_mut()) };
+            let mut p = std::ptr::null_mut();
+            for form in ["{ppath}.{name}[0]", "{ppath}.{name}(0)"] {
+                let probe = CString::new(form.replace("{ppath}", &ppath).replace("{name}", name)).unwrap();
+                p = unsafe { vpi_handle_by_name(probe.as_ptr(), std::ptr::null_mut()) };
+                if !p.is_null() {
+                    break;
+                }
+            }
+            if p.is_null() {
+                // GHDL reports VHDL generate elements through iteration
+                // only, as `label(0)`.
+                for form in [format!("{name}[0]"), format!("{name}(0)")] {
+                    if let Some(h) = self.scan_for(praw, &form) {
+                        p = h;
+                        break;
+                    }
+                }
+            }
             if !p.is_null() {
                 unsafe { vpi_free_object(p) };
                 let path = format!("{ppath}.{name}");
@@ -470,12 +542,24 @@ impl Backend for VpiBackend {
                         type_name: "generate array".into(),
                     },
                     children: None,
+                    pseudo: true,
                 });
                 self.by_path.insert(path, h);
                 self.entries[parent.0 as usize].children.get_or_insert_with(HashMap::new).insert(name.to_string(), h);
                 return Ok(Some(h));
             }
             return Ok(None);
+        }
+        // GHDL answers a lookup of a VHDL generate label with its first
+        // element, `label(0)`. That is the array, not the element.
+        let got = unsafe { cstr(vpi_get_str(vpiName, raw)) };
+        let lower = got.to_ascii_lowercase();
+        let want = name.to_ascii_lowercase();
+        if !lower.eq_ignore_ascii_case(&want)
+            && (lower.starts_with(&format!("{want}(")) || lower.starts_with(&format!("{want}[")))
+        {
+            unsafe { vpi_free_object(raw) };
+            return Ok(Some(self.make_pseudo_array(parent, praw, name, &ppath)));
         }
         let h = self.intern(raw, Some(format!("{ppath}.{name}")), name);
         if h == parent {
@@ -495,16 +579,51 @@ impl Backend for VpiBackend {
             }
         }
         let ppath = self.entries[parent.0 as usize].info.path.clone();
-        let is_pseudo = self.entries[parent.0 as usize].info.kind == ObjKind::GenArray;
+        let is_pseudo = self.entries[parent.0 as usize].pseudo;
         let mut raw = std::ptr::null_mut();
         if !is_pseudo {
             raw = unsafe { vpi_handle_by_index(self.raw(parent), index as i32) };
         }
         if raw.is_null() {
-            let full = CString::new(format!("{ppath}[{index}]")).unwrap();
-            raw = unsafe { vpi_handle_by_name(full.as_ptr(), std::ptr::null_mut()) };
+            // Verilog spells an element `name[i]`, VHDL `name(i)`.
+            for form in [format!("{ppath}[{index}]"), format!("{ppath}({index})")] {
+                let full = CString::new(form).unwrap();
+                raw = unsafe { vpi_handle_by_name(full.as_ptr(), std::ptr::null_mut()) };
+                if !raw.is_null() {
+                    break;
+                }
+            }
         }
         if raw.is_null() {
+            // Last resort: the element exists only as a child of the
+            // enclosing scope, named `label(i)` (GHDL) or `label[i]`. A
+            // pseudo array already holds that scope's handle; a real array
+            // object does not, so find the scope through the path.
+            let leaf = self.entries[parent.0 as usize].info.name.clone();
+            let scope = if is_pseudo {
+                self.raw(parent)
+            } else {
+                ppath
+                    .rsplit_once('.')
+                    .and_then(|(p, _)| self.by_path.get(p).copied())
+                    .map(|h| self.raw(h))
+                    .unwrap_or(std::ptr::null_mut())
+            };
+            if !scope.is_null() {
+                for form in [format!("{leaf}[{index}]"), format!("{leaf}({index})")] {
+                    if let Some(h) = self.scan_for(scope, &form) {
+                        raw = h;
+                        break;
+                    }
+                }
+            }
+        }
+        if raw.is_null() {
+            log::trace!(
+                "child_by_index: no {ppath}[{index}] (pseudo {is_pseudo}, leaf {:?}, kind {:?})",
+                self.entries[parent.0 as usize].info.name,
+                self.entries[parent.0 as usize].info.kind
+            );
             return Ok(None);
         }
         let h = self.intern(raw, Some(format!("{ppath}[{index}]")), &key);

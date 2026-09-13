@@ -16,6 +16,7 @@ rivet-core = { workspace = true }
 rivet-macros = { workspace = true }
 rivet-kit = { workspace = true }
 rivet-vpi = { workspace = true, optional = true }
+rivet-vhpi = { workspace = true, optional = true }
 rivet-verilator = { workspace = true, optional = true }
 rivet-cli = { workspace = true, optional = true }
 log = { workspace = true }
@@ -23,5 +24,8 @@ log = { workspace = true }
 [features]
 default = ["vpi"]
 vpi = ["dep:rivet-vpi"]
+# VHDL through VHPI (NVC). Can be enabled alongside `vpi`: one cdylib then
+# serves both a Verilog and a VHDL simulator.
+vhpi = ["dep:rivet-vhpi"]
 verilator = ["dep:rivet-verilator"]
 harness = ["dep:rivet-cli"]

@@ -11,6 +11,9 @@ pub enum Error {
     Timeout(String),
     Cancelled,
     Panicked(String),
+    /// The test does not apply to this simulator or design; it is recorded
+    /// as skipped rather than failed. Raise it with [`crate::skip`].
+    Skip(String),
     Msg(String),
 }
 
@@ -22,6 +25,7 @@ impl fmt::Display for Error {
             Error::Timeout(s) => write!(f, "timeout: {s}"),
             Error::Cancelled => write!(f, "task cancelled"),
             Error::Panicked(s) => write!(f, "task panicked: {s}"),
+            Error::Skip(s) => write!(f, "skipped: {s}"),
             Error::Msg(s) => f.write_str(s),
         }
     }

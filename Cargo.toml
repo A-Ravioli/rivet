@@ -5,6 +5,7 @@ members = [
     "crates/rivet-mock",
     "crates/rivet-macros",
     "crates/rivet-vpi",
+    "crates/rivet-vhpi",
     "crates/rivet-verilator",
     "crates/rivet-manifest",
     "crates/rivet-kit",
@@ -14,6 +15,7 @@ members = [
     "examples/bench",
     "examples/fifo",
     "examples/dff_vhdl",
+    "examples/vhdl_types",
     "examples/conformance",
     "examples/bus",
 ]
@@ -35,11 +37,14 @@ rivet-core = { path = "crates/rivet-core", version = "0.1.0" }
 rivet-mock = { path = "crates/rivet-mock", version = "0.1.0" }
 rivet-macros = { path = "crates/rivet-macros", version = "0.1.0" }
 rivet-vpi = { path = "crates/rivet-vpi", version = "0.1.0" }
+rivet-vhpi = { path = "crates/rivet-vhpi", version = "0.1.0" }
 rivet-verilator = { path = "crates/rivet-verilator", version = "0.1.0" }
 rivet-manifest = { path = "crates/rivet-manifest", version = "0.1.0" }
 rivet-kit = { path = "crates/rivet-kit", version = "0.1.0" }
 rivet-cli = { path = "crates/rivet-cli", version = "0.1.0" }
-rivet = { path = "crates/rivet", version = "0.1.0" }
+# No default backend: each test crate picks VPI, VHPI or Verilator,
+# because a library carrying two of them fails to load.
+rivet = { path = "crates/rivet", version = "0.1.0", default-features = false }
 inventory = "0.3"
 log = { version = "0.4", features = ["std"] }
 cc = "1"

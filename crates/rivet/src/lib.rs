@@ -51,6 +51,8 @@ pub mod harness {
         rivet_cli::harness_main(tests)
     }
 }
+#[cfg(feature = "vhpi")]
+pub use rivet_vhpi as vhpi;
 #[cfg(feature = "vpi")]
 pub use rivet_vpi as vpi;
 
