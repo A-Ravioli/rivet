@@ -110,7 +110,8 @@ pub fn usage() -> ! {
         "usage: rivet <new|run|build|watch|bindgen|cov|clean> [options] [-- sim args]\n\
          \n\
          options:\n\
-         \x20 --sim <icarus|verilator|ghdl|nvc>  simulator (default: icarus)\n\
+         \x20 --sim <name>               icarus (default), verilator, ghdl, nvc;\n\
+         \x20                            questa, xcelium, vcs, riviera, dsim (unverified)\n\
          \x20 -p, --package <name>       test crate (default: crate in the current directory)\n\
          \x20 -C <dir>                   change to directory first\n\
          \x20 --release                  build the harness in release mode\n\
@@ -433,6 +434,130 @@ fn build_nvc(m: &Manifest, opts: &Opts, sim_dir: &Path) -> Result<(), String> {
 
 /// Build the test crate's `cdylib` with extra cargo features, for backends
 /// the user's crate does not enable by default (VHPI).
+/// Build flows for the simulators Rivet has never run on. Every flag comes
+/// from cocotb's runner (`docs/design/00-cocotb-analysis.md` §5.1): the
+/// design-access flags matter most, since without them the harness cannot
+/// see any handles.
+fn build_commercial(m: &Manifest, opts: &Opts, sim_dir: &Path, so: &Path) -> Result<Launch, String> {
+    std::fs::create_dir_all(sim_dir).map_err(|e| e.to_string())?;
+    let cfg = m.sim(&opts.sim);
+    let sources: Vec<String> = m.sources_abs().iter().map(|p| p.display().to_string()).collect();
+    let top = m.design.top.clone();
+    let so = so.display().to_string();
+    let params: Vec<(String, String)> = m.params_for(opts.param_set.as_deref()).into_iter().collect();
+    let hash = hash_inputs(&m.sources_abs(), &cfg.args)?;
+    let stamp = sim_dir.join("build.hash");
+    let fresh = std::fs::read_to_string(&stamp).ok().as_deref() == Some(&hash.to_string());
+    let run = |program: &str, args: Vec<String>| -> Result<(), String> {
+        let mut cmd = Command::new(program);
+        cmd.args(args).current_dir(sim_dir);
+        run_cmd(cmd, opts.verbose)
+    };
+    let launch = match opts.sim.as_str() {
+        "questa" => {
+            if !fresh {
+                let mut args = vec!["-work".into(), "work".into()];
+                args.extend(cfg.args.iter().cloned());
+                args.extend(sources.clone());
+                run("vlog", args)?;
+            }
+            let mut args = vec![
+                "-c".into(),
+                "-pli".into(),
+                so.clone(),
+                // Without full access the harness sees no handles.
+                "-voptargs=-access=rw+/.".into(),
+            ];
+            for (k, v) in &params {
+                args.push(format!("-g{k}={v}"));
+            }
+            args.extend(cfg.run_args.iter().cloned());
+            args.push(format!("work.{top}"));
+            args.push("-do".into());
+            args.push("run -all; quit -f".into());
+            Launch::External { program: "vsim".into(), args }
+        }
+        "xcelium" => {
+            // Single step: xrun compiles and runs.
+            let mut args = vec![
+                "-access".into(),
+                "+rwc".into(),
+                "-loadvpisim".into(),
+                format!("{so}:vlog_startup_routines_bootstrap"),
+                "-top".into(),
+                top.clone(),
+            ];
+            for (k, v) in &params {
+                args.push("-defparam".into());
+                args.push(format!("{top}.{k}={v}"));
+            }
+            args.extend(cfg.args.iter().cloned());
+            args.extend(sources.clone());
+            args.extend(cfg.run_args.iter().cloned());
+            Launch::External { program: "xrun".into(), args }
+        }
+        "vcs" => {
+            if !fresh {
+                // VCS loads the VPI library at compile time as well as at
+                // run time (cocotb runner.py:276-279).
+                let mut args = vec![
+                    "-full64".into(),
+                    "-sverilog".into(),
+                    "+acc+3".into(),
+                    "-debug_access+all".into(),
+                    "-load".into(),
+                    so.clone(),
+                    "-o".into(),
+                    "simv".into(),
+                    "-top".into(),
+                    top.clone(),
+                ];
+                for (k, v) in &params {
+                    args.push(format!("-pvalue+{top}.{k}={v}"));
+                }
+                args.extend(cfg.args.iter().cloned());
+                args.extend(sources.clone());
+                run("vcs", args)?;
+            }
+            Launch::External { program: sim_dir.join("simv").display().to_string(), args: cfg.run_args.to_vec() }
+        }
+        "riviera" => {
+            if !fresh {
+                let mut args = vec!["-work".into(), "work".into()];
+                args.extend(cfg.args.iter().cloned());
+                args.extend(sources.clone());
+                run("alog", args)?;
+            }
+            // Riviera drives the run from a .do script.
+            let mut script = String::new();
+            let generics: String = params.iter().map(|(k, v)| format!(" -g{k}={v}")).collect();
+            script.push_str(&format!("asim -pli {so}{generics} work.{top}\nrun -all\nendsim\nquit -f\n"));
+            let do_path = sim_dir.join("rivet.do");
+            std::fs::write(&do_path, script).map_err(|e| e.to_string())?;
+            Launch::External { program: "vsimsa".into(), args: vec!["-do".into(), do_path.display().to_string()] }
+        }
+        "dsim" => {
+            let image = sim_dir.join("rivet.so").display().to_string();
+            if !fresh {
+                let mut args =
+                    vec!["-genimage".into(), image.clone(), "-pli_lib".into(), so.clone(), "-top".into(), top.clone()];
+                for (k, v) in &params {
+                    args.push(format!("-defparam+{top}.{k}={v}"));
+                }
+                args.extend(cfg.args.iter().cloned());
+                args.extend(sources.clone());
+                run("dsim", args)?;
+            }
+            let mut args = vec!["-image".into(), image, "-pli_lib".into(), so];
+            args.extend(cfg.run_args.iter().cloned());
+            Launch::External { program: "dsim".into(), args }
+        }
+        other => return Err(format!("unsupported simulator {other:?}")),
+    };
+    std::fs::write(&stamp, hash.to_string()).map_err(|e| e.to_string())?;
+    Ok(launch)
+}
+
 fn cargo_build_features(
     pkg: &Package,
     opts: &Opts,
@@ -542,10 +667,26 @@ pub fn shard(names: &[String], jobs: usize) -> Vec<Vec<String>> {
 
 /// What a build produced and how to launch the simulator from it.
 enum Launch {
-    Icarus { vvp: PathBuf, plugin_dir: PathBuf, lib_name: String },
-    Ghdl { so: PathBuf },
-    Nvc { so: PathBuf },
-    Verilator { bin: PathBuf },
+    Icarus {
+        vvp: PathBuf,
+        plugin_dir: PathBuf,
+        lib_name: String,
+    },
+    /// A simulator launched by a command line Rivet builds but has never
+    /// run: the commercial tools. See `docs/SIMULATOR-QUIRKS.md`.
+    External {
+        program: String,
+        args: Vec<String>,
+    },
+    Ghdl {
+        so: PathBuf,
+    },
+    Nvc {
+        so: PathBuf,
+    },
+    Verilator {
+        bin: PathBuf,
+    },
 }
 
 /// Environment every simulator run gets.
@@ -652,6 +793,14 @@ fn sim_command(launch: &Launch, opts: &Opts, m: &Manifest, sim_dir: &Path, run_d
             cmd.stdin(Stdio::null());
             cmd
         }
+        Launch::External { program, args } => {
+            let mut cmd = Command::new(program);
+            cmd.args(args);
+            cmd.args(&opts.extra);
+            cmd.current_dir(run_dir);
+            cmd.stdin(Stdio::null());
+            cmd
+        }
         Launch::Verilator { bin } => {
             let mut cmd = Command::new(bin);
             if opts.waves {
@@ -692,7 +841,17 @@ fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Opti
             cargo_build(pkg, opts, true, set)?;
             Ok(Launch::Verilator { bin: pkg.target_dir.join(profile).join(pkg.verilator_bin.as_ref().unwrap()) })
         }
-        other => Err(format!("unsupported simulator {other:?} (icarus, verilator, ghdl, nvc)")),
+        // Never executed: the flags come from cocotb's runner and the
+        // behaviour from docs/SIMULATOR-QUIRKS.md. A licence holder running
+        // examples/conformance is what turns these from code into support.
+        "questa" | "xcelium" | "vcs" | "riviera" | "dsim" => {
+            cargo_build(pkg, opts, false, set)?;
+            let so = pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name));
+            build_commercial(m, opts, sim_dir, &so)
+        }
+        other => Err(format!(
+            "unsupported simulator {other:?} (icarus, verilator, ghdl, nvc; questa, xcelium, vcs, riviera and dsim are implemented but unverified)"
+        )),
     }
 }
 

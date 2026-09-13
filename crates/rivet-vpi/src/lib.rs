@@ -184,7 +184,19 @@ impl VpiBackend {
     }
 
     fn classify(&self, raw: vpiHandle, vtype: i32, name: String, path: String) -> ObjInfo {
-        let size = unsafe { vpi_get(vpiSize, raw) };
+        let mut size = unsafe { vpi_get(vpiSize, raw) };
+        // Questa answers 1 for every scalar-typed object, including the
+        // sized ones (cocotb VpiImpl.cpp:230-258).
+        if self.sim == Sim::Questa && size == 1 {
+            size = match vtype {
+                vpiByteVar => 8,
+                vpiShortIntVar => 16,
+                vpiIntVar | vpiIntegerVar => 32,
+                vpiLongIntVar | vpiTimeVar => 64,
+                vpiRealVar => 64,
+                _ => size,
+            };
+        }
         let (kind, width, is_const) = match vtype {
             vpiModule | vpiInterface | vpiProgram | vpiGenScope | vpiInternalScope | vpiPort | vpiScope | vpiBegin
             | vpiNamedBegin => (ObjKind::Module, 0, false),
@@ -311,6 +323,49 @@ impl VpiBackend {
             }
         }
         None
+    }
+
+    /// The relations that make up a scope's children, with the
+    /// per-simulator exceptions cocotb catalogues.
+    fn module_children(&self) -> Vec<i32> {
+        let mut v: Vec<i32> = MODULE_CHILDREN.to_vec();
+        if self.sim == Sim::Riviera {
+            // Aldec segfaults iterating these in a mixed-language design
+            // (cocotb VpiIterator.cpp:25-41).
+            v.retain(|&r| r != vpiModule);
+        }
+        if self.sim == Sim::Questa {
+            // Questa answers vpiInstance where others answer vpiModule and
+            // vpiPackage (cocotb VpiImpl.hpp:266-275).
+            v.push(vpiInstance);
+        }
+        v
+    }
+
+    /// Xcelium returns a handle for a generate scope that does not exist and
+    /// then crashes when it is used, so validate it by iterating the parent's
+    /// internal scopes first (cocotb VpiImpl.cpp:382-404).
+    fn validate_gen_scope(&self, parent: vpiHandle, raw: vpiHandle) -> bool {
+        if self.sim != Sim::Xcelium {
+            return true;
+        }
+        let want = unsafe { cstr(vpi_get_str(vpiFullName, raw)) };
+        let it = unsafe { vpi_iterate(vpiInternalScope, parent) };
+        if it.is_null() {
+            return false;
+        }
+        loop {
+            let h = unsafe { vpi_scan(it) };
+            if h.is_null() {
+                return false;
+            }
+            let name = unsafe { cstr(vpi_get_str(vpiFullName, h)) };
+            let same = name == want;
+            unsafe { vpi_free_object(h) };
+            if same {
+                return true;
+            }
+        }
     }
 
     fn check_error(&self, what: &str) -> Result<()> {
@@ -566,6 +621,12 @@ impl Backend for VpiBackend {
             unsafe { vpi_free_object(raw) };
             return Ok(Some(self.make_pseudo_array(parent, praw, name, &ppath)));
         }
+        // Xcelium answers with a generate scope that does not really exist
+        // and crashes later; check it against the parent's internal scopes.
+        if unsafe { vpi_get(vpiType, raw) } == vpiGenScope && !self.validate_gen_scope(praw, raw) {
+            unsafe { vpi_free_object(raw) };
+            return Ok(None);
+        }
         let h = self.intern(raw, Some(format!("{ppath}.{name}")), name);
         if h == parent {
             // GHDL answers a lookup of an unknown generic with the scope
@@ -642,12 +703,18 @@ impl Backend for VpiBackend {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         // A struct's children are its members, not a scope's declarations.
-        let rels: &[i32] = if self.entries[parent.0 as usize].info.kind == ObjKind::Struct {
-            STRUCT_CHILDREN
+        let rels: Vec<i32> = if self.entries[parent.0 as usize].info.kind == ObjKind::Struct {
+            let mut v = STRUCT_CHILDREN.to_vec();
+            // Xcelium crashes iterating vpiNetArray inside a struct
+            // (cocotb VpiIterator.cpp:51-53).
+            if self.sim != Sim::Xcelium {
+                v.push(vpiNetArray);
+            }
+            v
         } else {
-            MODULE_CHILDREN
+            self.module_children()
         };
-        for &rel in rels {
+        for &rel in &rels {
             let it = unsafe { vpi_iterate(rel, praw) };
             if it.is_null() {
                 continue;
@@ -1002,6 +1069,10 @@ unsafe extern "C" fn rivet_vpi_callback(cb: *mut s_cb_data) -> i32 {
             // (cocotb VpiCbHdl.cpp:145-174).
             if sim == Sim::Verilator && !rec.cb_handle.is_null() {
                 vpi_remove_cb(rec.cb_handle);
+            } else if matches!(sim, Sim::Xcelium | Sim::Vcs | Sim::Riviera) && !rec.cb_handle.is_null() {
+                // These free the callback object themselves but leak the
+                // handle unless it is released (cocotb VpiCbHdl.cpp:162-166).
+                vpi_free_object(rec.cb_handle);
             }
         }
         runtime::dispatch(event);
@@ -1063,6 +1134,20 @@ pub fn startup() {
 /// timers natively).
 pub fn startup_with(wrap: impl FnOnce(VpiBackend) -> Box<dyn Backend>) {
     rivet_core::log::init();
+    // VCS loads the VPI library during compilation as well as during the
+    // run; there is no design then, and vpi_get_vlog_info fails
+    // (cocotb VpiImpl.cpp:843-852).
+    unsafe {
+        let mut info = s_vpi_vlog_info {
+            argc: 0,
+            argv: std::ptr::null_mut(),
+            product: std::ptr::null_mut(),
+            version: std::ptr::null_mut(),
+        };
+        if vpi_get_vlog_info(&mut info) == 0 {
+            return;
+        }
+    }
     let backend = VpiBackend::new();
     log::debug!("rivet VPI backend on {} ({:?})", backend.version(), backend.sim());
     runtime::init(wrap(backend));
