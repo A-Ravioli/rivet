@@ -59,7 +59,8 @@ the suites found.
   states, whatever ran before the test and however the run is sharded.
 
 The plan for everything still open is in
-[`04-remaining-work.md`](04-remaining-work.md).
+[`04-remaining-work.md`](04-remaining-work.md); the phased plan for the
+places cocotb is still ahead is in [`05-parity-plan.md`](05-parity-plan.md).
 
 ## Known gaps and decisions
 

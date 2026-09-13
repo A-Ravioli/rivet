@@ -282,6 +282,10 @@ Still open:
 
 ## Suggested order
 
+[`05-parity-plan.md`](05-parity-plan.md) re-orders these items by what they
+cost a user rather than by engineering leverage, and adds the adoption work
+(releases, documentation, iteration speed) this document does not cover.
+
 1. §0 fixes (done in this commit) and the Verilator matrix in CI.
 2. §1 VHPI on NVC, then §7's RNG and struct members (small, unblock
    users).

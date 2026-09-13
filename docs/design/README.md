@@ -16,6 +16,9 @@ Read in order.
    open, against the roadmap.
 5. [`04-remaining-work.md`](04-remaining-work.md): the concrete plan for each
    remaining gap, what it costs, and what needs a licence.
+6. [`05-parity-plan.md`](05-parity-plan.md): the phased plan for everything
+   cocotb still does better, ranked by what it costs a user, with milestones
+   and exit criteria.
 
 Test coverage and findings: [`../testing.md`](../testing.md). Coming from cocotb: [`../migration.md`](../migration.md). Benchmarks:
 [`../benchmarks.md`](../benchmarks.md).
