@@ -148,8 +148,9 @@ through the load port using `rivet::rng()`.
 
 ### `build.rs`, `src/main.rs`, `tests/sim.rs`
 
+`build.rs`:
+
 ```rust
-// build.rs
 fn main() {
     // Only the Verilator flow compiles the design into this crate.
     if std::env::var_os("CARGO_FEATURE_VERILATOR").is_some() {
@@ -158,8 +159,10 @@ fn main() {
 }
 ```
 
+`src/main.rs`:
+
 ```rust
-//! src/main.rs: Verilator entry point; `build.rs` links the compiled model in.
+//! Verilator entry point: `build.rs` links the compiled model in.
 
 // Link the test library so its `#[rivet::test]` registrations are present.
 use counter_tb as _;
@@ -169,8 +172,10 @@ fn main() {
 }
 ```
 
+`tests/sim.rs`:
+
 ```rust
-//! tests/sim.rs: `cargo test` entry point; see `rivet::harness`.
+//! `cargo test` entry point; see `rivet::harness`.
 use counter_tb as _;
 
 fn main() -> std::process::ExitCode {

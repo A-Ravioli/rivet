@@ -169,10 +169,10 @@ the usage text and exits 2.
 
 ### `--filter`
 
-Patterns are comma-separated. Each is a regular expression searched against
-`module::name` and against the bare test name, as cocotb's
-`COCOTB_TEST_FILTER` is, and a pattern that is not valid regular expression
-syntax, or that matches nothing as one, falls back to a substring match. So
+Patterns are comma-separated. Each is tried first as a regular expression,
+searched against `module::name` and against the bare test name, as cocotb's
+`COCOTB_TEST_FILTER` is. A pattern that does not compile, or that compiles
+and matches nothing, is then tried as a literal substring. So
 `axi_mem_bursts[16]` selects that one parametrised test rather than being
 read as a character class.
 
@@ -185,11 +185,11 @@ printed.
 ### `--gui` and `--wave-open`
 
 `--gui` runs Questa, Xcelium or VCS under its own GUI and leaves the run
-under your control instead of quitting at the end. The open simulators have
-no GUI of their own, so `--wave-open` is the equivalent: when the run
-finishes it opens the dump in `surfer`, or in `gtkwave` if surfer is not
-installed, and prints where the dump is when neither is. Both imply
-`--waves`.
+under your control instead of quitting at the end. Icarus, Verilator, GHDL
+and NVC have no GUI of their own, so `--wave-open` is the equivalent there:
+when the run finishes it opens the dump in `surfer`, or in `gtkwave` if
+surfer is not installed, and prints where the dump is when neither is. Both
+imply `--waves`.
 
 ## Exit codes
 

@@ -279,7 +279,9 @@ impl Build {
         if self.trace_fst {
             println!("cargo:rustc-link-arg=-lz");
         }
-        println!("cargo:rustc-link-arg=-lstdc++");
+        // Apple ships libc++, not libstdc++: asking for -lstdc++ there
+        // fails the link with "library 'stdc++' not found".
+        println!("cargo:rustc-link-arg={}", if mach_o { "-lc++" } else { "-lstdc++" });
         println!("cargo:rustc-link-arg=-lpthread");
         println!("cargo:rustc-env=RIVET_VERILATOR_TOP={}", self.top);
     }

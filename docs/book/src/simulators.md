@@ -222,21 +222,25 @@ vhpi = ["rivet/vhpi"]
 ```
 
 `rivet run --sim nvc` builds the library with
-`--no-default-features --features vhpi`; every other simulator uses the
-crate's default features. `examples/dff_vhdl` and `examples/vhdl_types` are
-both written this way.
+`--no-default-features --features vhpi`; other simulators use the crate's
+default features, and the Verilator flow adds its own `verilator` feature.
+`examples/dff_vhdl` and `examples/vhdl_types` are both written this way.
 
 **What `rivet run --sim nvc` does.**
 
 ```text
-nvc --work=sim_build/nvc/work --std=2008 <args> -a <sources>
-nvc --work=sim_build/nvc/work --std=2008 <args> -e -g<k>=<v>... <top>
-nvc --work=sim_build/nvc/work --std=2008 -r --load <lib>.so \
+nvc --work=sim_build/nvc/work [--std=2008] <args> -a <sources>
+nvc --work=sim_build/nvc/work [--std=2008] <args> -e -g<k>=<v>... <top>
+nvc --work=sim_build/nvc/work [--std=2008] -r --load <lib>.so \
         [--wave <run_dir>/<top>.fst] <top> <run_args>
 ```
 
+The bracketed `--std=2008` is added only when `args` contains no `--std`
+option of its own. `args` itself reaches `-a` and `-e`; only `--std` reaches
+`-r`.
+
 The elaborated design is saved in the work library, where `nvc -r` finds it.
-Generics are elaborated in, so a parameter set is a different build and the
+Generics are elaborated in, so a parameter set is a different build, and the
 build hash covers them.
 
 **Waveforms.** `--waves` passes `--wave`, which covers the whole run. VHPI

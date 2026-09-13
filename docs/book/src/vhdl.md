@@ -47,8 +47,9 @@ vhpi = ["rivet/vhpi"]
 ```
 
 `rivet run --sim nvc` builds the library with
-`--no-default-features --features vhpi` for you. Any other simulator uses
-the crate's default features.
+`--no-default-features --features vhpi` for you. Other simulators use the
+crate's default features, and the Verilator flow adds its own `verilator`
+feature and builds the binary target.
 
 ## The testbench shape
 
@@ -82,10 +83,10 @@ end architecture;
 ```
 
 The design under test is an instance inside it, reached with
-`dut.module("dut")`. A top-level entity that does have ports also works, and
-`examples/dff_vhdl` is written that way, but the port-less form is what a
-VHDL flow usually produces and it needs no elaboration-time driver for the
-ports.
+`dut.module("dut")`. A top-level entity that does have ports also works:
+`examples/dff_vhdl` drives the ports of a `dff` entity directly, on both
+simulators. The port-less form is the one a VHDL flow usually produces, and
+it is what the rest of this chapter uses.
 
 ## What each simulator exposes
 

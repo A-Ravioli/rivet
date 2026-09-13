@@ -834,6 +834,17 @@ fn sim_command(launch: &Launch, opts: &Opts, m: &Manifest, sim_dir: &Path, run_d
     }
 }
 
+/// The file Cargo writes for a `cdylib`: `lib<name>.so` on Linux and the
+/// BSDs, `lib<name>.dylib` on macOS. Every simulator that loads the harness
+/// as a PLI module is handed this file.
+fn cdylib_file(lib_name: &str) -> String {
+    if cfg!(target_os = "macos") {
+        format!("lib{lib_name}.dylib")
+    } else {
+        format!("lib{lib_name}.so")
+    }
+}
+
 /// Build the harness and the design for one parameter set.
 fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Option<&str>) -> Result<Launch, String> {
     std::fs::create_dir_all(sim_dir).map_err(|e| e.to_string())?;
@@ -842,7 +853,7 @@ fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Opti
         "icarus" => {
             cargo_build(pkg, opts, false, set)?;
             let vvp = build_icarus(m, opts, sim_dir, set)?;
-            let so = pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name));
+            let so = pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name));
             let plugin = sim_dir.join(format!("{}.vpi", pkg.lib_name));
             std::fs::copy(&so, &plugin).map_err(|e| format!("cannot copy {}: {e}", so.display()))?;
             Ok(Launch::Icarus { vvp, plugin_dir: sim_dir.to_path_buf(), lib_name: pkg.lib_name.clone() })
@@ -850,12 +861,12 @@ fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Opti
         "ghdl" => {
             cargo_build(pkg, opts, false, set)?;
             build_ghdl(m, opts, sim_dir)?;
-            Ok(Launch::Ghdl { so: pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name)) })
+            Ok(Launch::Ghdl { so: pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name)) })
         }
         "nvc" => {
             cargo_build_features(pkg, opts, &["vhpi"], true, set)?;
             build_nvc(m, opts, sim_dir)?;
-            Ok(Launch::Nvc { so: pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name)) })
+            Ok(Launch::Nvc { so: pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name)) })
         }
         "verilator" => {
             cargo_build(pkg, opts, true, set)?;
@@ -866,7 +877,7 @@ fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Opti
         // examples/conformance is what turns these from code into support.
         "questa" | "xcelium" | "vcs" | "riviera" | "dsim" => {
             cargo_build(pkg, opts, false, set)?;
-            let so = pkg.target_dir.join(profile).join(format!("lib{}.so", pkg.lib_name));
+            let so = pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name));
             build_commercial(m, opts, sim_dir, &so)
         }
         other => Err(format!(
@@ -1491,6 +1502,20 @@ mod tests {
 
     fn t(m: &str, n: &str) -> (String, String) {
         (m.into(), n.into())
+    }
+
+    #[test]
+    fn cdylib_extension_matches_the_platform() {
+        let f = cdylib_file("demo");
+        assert!(f.starts_with("libdemo."));
+        // Cargo names a cdylib after the platform, and every simulator is
+        // handed that exact file; getting this wrong fails the run with
+        // "cannot copy ...: No such file or directory".
+        if cfg!(target_os = "macos") {
+            assert_eq!(f, "libdemo.dylib");
+        } else {
+            assert_eq!(f, "libdemo.so");
+        }
     }
 
     #[test]
