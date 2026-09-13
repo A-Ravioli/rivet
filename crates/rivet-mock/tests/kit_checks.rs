@@ -101,7 +101,7 @@ inventory::submit! {
         let _h = assert_never("count_above_3", clk, move || count.get_u64_lossy() > 3);
         Timer::new(200.ns()).await;
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
     TestDesc { name: "implies_fires", module: "chk", run: |dut: Module| boxed(async move {
@@ -116,7 +116,7 @@ inventory::submit! {
         req.set(0);
         Timer::new(100.ns()).await;
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
     TestDesc { name: "x_detected", module: "chk", run: |dut: Module| boxed(async move {
@@ -126,7 +126,7 @@ inventory::submit! {
         Timer::new(100.ns()).await;
         Ok(())
     // Runs first: `x_cleared` fixes xsig for the rest of the simulation.
-    }), timeout: || None, skip: false, expect_fail: false, stage: -1, wall_timeout: None, param_sets: &[] }
+    }), stage: -1, ..TestDesc::DEFAULT }
 }
 inventory::submit! {
     TestDesc { name: "x_cleared", module: "chk", run: |dut: Module| boxed(async move {
@@ -141,7 +141,7 @@ inventory::submit! {
         Timer::new(100.ns()).await;
         assert!(find_x(clk, &[xsig], 3).await.is_none());
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), ..TestDesc::DEFAULT }
 }
 
 #[test]

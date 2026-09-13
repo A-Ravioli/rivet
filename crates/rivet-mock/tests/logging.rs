@@ -13,7 +13,7 @@ inventory::submit! {
         log::info!("hello from the test with a \"quote\"");
         log::warn!("and a warning");
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), ..TestDesc::DEFAULT }
 }
 
 #[test]

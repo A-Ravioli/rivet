@@ -132,10 +132,10 @@ fn record(name: &str) {
 }
 
 inventory::submit! {
-    TestDesc { name: "seed_a", module: "rand", run: |_dut: Module| boxed(async { record("seed_a"); Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "seed_a", module: "rand", run: |_dut: Module| boxed(async { record("seed_a"); Ok(()) }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "seed_b", module: "rand", run: |_dut: Module| boxed(async { record("seed_b"); Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "seed_b", module: "rand", run: |_dut: Module| boxed(async { record("seed_b"); Ok(()) }), ..TestDesc::DEFAULT }
 }
 
 fn design() -> Design {

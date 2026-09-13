@@ -167,7 +167,7 @@ inventory::submit! {
         let _t = spawn(async { Timer::steps(2).await; });
         Timer::steps(3).await;
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), ..TestDesc::DEFAULT }
 }
 
 #[test]

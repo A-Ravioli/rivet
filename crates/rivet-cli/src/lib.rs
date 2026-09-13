@@ -54,6 +54,8 @@ pub struct Opts {
     pub param_set: Option<String>,
     pub cov_threshold: Option<f64>,
     pub update_golden: bool,
+    /// Shuffle the test order within each stage, reproducibly from the seed.
+    pub shuffle: bool,
     /// bindgen: write the hierarchy here instead of running tests.
     pub dump: Option<PathBuf>,
     pub out: Option<PathBuf>,
@@ -89,6 +91,7 @@ impl Opts {
             param_set: None,
             cov_threshold: None,
             update_golden: false,
+            shuffle: false,
             dump: None,
             out: None,
             manifest: std::env::var("RIVET_MANIFEST").ok().filter(|s| !s.is_empty()).map(PathBuf::from),
@@ -106,7 +109,7 @@ pub fn usage() -> ! {
          \x20 -p, --package <name>       test crate (default: crate in the current directory)\n\
          \x20 -C <dir>                   change to directory first\n\
          \x20 --release                  build the harness in release mode\n\
-         \x20 --filter <a,b>             run only tests whose name contains one of these\n\
+         \x20 --filter <a,b>             run only tests matching one of these regular expressions\n\
          \x20 -j, --jobs <n>             run tests in n simulator processes (tests must be independent)\n\
          \x20 --param-set <name>         run only this [design.param_sets] entry (default: all)\n\
          \x20 --waves                    dump waveforms\n\
@@ -119,6 +122,7 @@ pub fn usage() -> ! {
          \x20 --no-log-dir               no per-test log files\n\
          \x20 --cov-threshold <pct>      fail the run below this functional coverage\n\
          \x20 --update-golden            rewrite golden trace files from this run\n\
+         \x20 --shuffle                  shuffle test order within each stage (reproducible from --seed)\n\
          \x20 --manifest <rivet.toml>    design description (default: next to or above the crate)\n\
          \x20 --path <dir>               new: depend on a Rivet checkout instead of crates.io\n\
          \x20 -o <file>                  bindgen: output file (default src/dut.rs)\n\
@@ -168,6 +172,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
             "--no-log-dir" => o.no_log_dir = true,
             "--cov-threshold" | "--threshold" => o.cov_threshold = Some(num(it.next(), "--cov-threshold")),
             "--update-golden" => o.update_golden = true,
+            "--shuffle" => o.shuffle = true,
             "-o" | "--out" => o.out = it.next().map(PathBuf::from),
             "--manifest" => o.manifest = it.next().map(PathBuf::from),
             "--path" => o.rivet_path = it.next().map(PathBuf::from),
@@ -512,6 +517,8 @@ pub fn read_results_json(path: &Path) -> Result<(Vec<TestResult>, i32, u64), Str
             sim_time_steps: t["sim_time_steps"].as_u64().unwrap_or(0),
             wall_secs: t["wall_secs"].as_f64().unwrap_or(0.0),
             seed: t["seed"].as_u64().unwrap_or(0),
+            file: t["file"].as_str().unwrap_or("").to_string(),
+            line: t["line"].as_u64().unwrap_or(0) as u32,
         })
         .collect();
     Ok((tests, precision, seed))
@@ -566,6 +573,9 @@ fn common_env(cmd: &mut Command, opts: &Opts, m: &Manifest, pkg: &Package, sim_d
     }
     if opts.update_golden {
         cmd.env("RIVET_UPDATE_GOLDEN", "1");
+    }
+    if opts.shuffle {
+        cmd.env("RIVET_SHUFFLE", "1");
     }
     if opts.waves_per_test {
         cmd.env("RIVET_WAVES", "per-test");
@@ -1205,6 +1215,8 @@ mod tests {
                 sim_time_steps: 10,
                 wall_secs: 0.5,
                 seed: 7,
+                file: "t.rs".into(),
+                line: 1,
             },
             TestResult {
                 name: "b".into(),
@@ -1213,6 +1225,8 @@ mod tests {
                 sim_time_steps: 20,
                 wall_secs: 0.25,
                 seed: 8,
+                file: "t.rs".into(),
+                line: 1,
             },
             TestResult {
                 name: "c".into(),
@@ -1221,6 +1235,8 @@ mod tests {
                 sim_time_steps: 0,
                 wall_secs: 0.0,
                 seed: 0,
+                file: "t.rs".into(),
+                line: 1,
             },
         ];
         std::fs::write(&p, rivet_core::test::results_json(&results, "mock", -9)).unwrap();

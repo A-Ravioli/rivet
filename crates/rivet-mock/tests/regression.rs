@@ -8,32 +8,32 @@ use rivet_core::{inventory, Module, TimeExt};
 use rivet_mock::Design;
 
 inventory::submit! {
-    TestDesc { name: "b_passes", module: "suite", run: |_dut: Module| boxed(async { Timer::steps(3).await; Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "b_passes", module: "suite", run: |_dut: Module| boxed(async { Timer::steps(3).await; Ok(()) }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "a_fails", module: "suite", run: |_| boxed(async { Err(rivet_core::Error::Msg("nope".into())) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "a_fails", module: "suite", run: |_| boxed(async { Err(rivet_core::Error::Msg("nope".into())) }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "c_expected_failure", module: "suite", run: |_| boxed(async { rivet_core::bail!("meant to") }), timeout: || None, skip: false, expect_fail: true, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "c_expected_failure", module: "suite", run: |_| boxed(async { rivet_core::bail!("meant to") }), expect_fail: true, stage: 0, ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "d_unexpected_pass", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: true, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "d_unexpected_pass", module: "suite", run: |_| boxed(async { Ok(()) }), expect_fail: true, stage: 0, ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "e_skipped", module: "suite", run: |_| boxed(async { panic!("never runs") }), timeout: || None, skip: true, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "e_skipped", module: "suite", run: |_| boxed(async { panic!("never runs") }), skip: true, expect_fail: false, stage: 0, ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "f_times_out", module: "suite", run: |_| boxed(async { Timer::new(1.ms()).await; Ok(()) }), timeout: || Some(20.ns()), skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "f_times_out", module: "suite", run: |_| boxed(async { Timer::new(1.ms()).await; Ok(()) }), timeout: || Some(20.ns()), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "g_panics", module: "suite", run: |_| boxed(async { Timer::steps(1).await; panic!("kaboom") }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "g_panics", module: "suite", run: |_| boxed(async { Timer::steps(1).await; panic!("kaboom") }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
     TestDesc { name: "h_child_panics", module: "suite", run: |_| boxed(async {
         let _h = rivet_core::spawn(async { Timer::steps(1).await; panic!("child kaboom") });
         Timer::steps(5).await;
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), ..TestDesc::DEFAULT }
 }
 inventory::submit! {
     TestDesc { name: "z_first_by_stage", module: "suite", run: |dut: Module| boxed(async move {
@@ -41,13 +41,13 @@ inventory::submit! {
         assert_eq!(dut.signal("x").unwrap().get_u64_lossy(), 0);
         dut.signal("x").unwrap().set_now(1);
         Ok(())
-    }), timeout: || None, skip: false, expect_fail: false, stage: -1, wall_timeout: None, param_sets: &[] }
+    }), stage: -1, ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "bad_timeout", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || Some(1.5.steps()), skip: false, expect_fail: false, stage: 1, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "bad_timeout", module: "suite", run: |_| boxed(async { Ok(()) }), timeout: || Some(1.5.steps()), stage: 1, ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "other_module", module: "elsewhere", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "other_module", module: "elsewhere", run: |_| boxed(async { Ok(()) }), ..TestDesc::DEFAULT }
 }
 
 fn design() -> Design {
@@ -59,7 +59,9 @@ fn design() -> Design {
 
 #[test]
 fn full_regression_outcomes_and_order() {
-    let results = rivet_mock::run_regression(design(), all_tests(), None);
+    // Scoped to this test's own modules with a regular expression, so
+    // registrations added elsewhere in the file do not change the list.
+    let results = rivet_mock::run_regression(design(), all_tests(), Some("^(suite|elsewhere|sets)::"));
     let names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(
         names,
@@ -171,10 +173,10 @@ fn simulator_ending_early_fails_the_running_test() {
 }
 
 inventory::submit! {
-    TestDesc { name: "only_w16", module: "sets", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &["w16"] }
+    TestDesc { name: "only_w16", module: "sets", run: |_| boxed(async { Ok(()) }), param_sets: &["w16"], ..TestDesc::DEFAULT }
 }
 inventory::submit! {
-    TestDesc { name: "any_set", module: "sets", run: |_| boxed(async { Ok(()) }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    TestDesc { name: "any_set", module: "sets", run: |_| boxed(async { Ok(()) }), ..TestDesc::DEFAULT }
 }
 
 #[test]
@@ -193,4 +195,102 @@ fn param_sets_select_tests() {
     assert!(selected(any, Some("any")));
     assert_eq!(rivet_core::test::param_set().as_deref(), Some("w16"));
     std::env::remove_var("RIVET_PARAM_SET");
+}
+
+// ---------------------------------------------------------------------------
+// Parity with cocotb's regression manager: regular-expression filters, a
+// reproducible shuffle, failure-message matching, expected timeouts, an
+// early pass from any task, and the source location in results.xml.
+
+inventory::submit! {
+    TestDesc { name: "msg_matches", module: "parity", run: |_| boxed(async {
+        rivet_core::bail!("counter overflowed at 42")
+    }), expect_fail: true, expect_fail_msg: Some("overflowed"), file: file!(), line: line!(), ..TestDesc::DEFAULT }
+}
+inventory::submit! {
+    TestDesc { name: "msg_does_not_match", module: "parity", run: |_| boxed(async {
+        rivet_core::bail!("something else entirely")
+    }), expect_fail: true, expect_fail_msg: Some("overflowed"), ..TestDesc::DEFAULT }
+}
+inventory::submit! {
+    TestDesc { name: "times_out_on_purpose", module: "parity", run: |_| boxed(async {
+        Timer::new(1.ms()).await;
+        Ok(())
+    }), timeout: || Some(20.ns()), expect_timeout: true, ..TestDesc::DEFAULT }
+}
+inventory::submit! {
+    TestDesc { name: "finished_by_a_child", module: "parity", run: |_| boxed(async {
+        // A monitor decides the test is done; the main task would otherwise
+        // wait for a lot longer.
+        let _m = rivet_core::spawn(async {
+            Timer::steps(2).await;
+            rivet_core::runtime::finish_test();
+        });
+        Timer::new(1.ms()).await;
+        Ok(())
+    }), timeout: || Some(500.us()), ..TestDesc::DEFAULT }
+}
+
+#[test]
+fn message_matching_expected_timeouts_and_early_finish() {
+    let results = rivet_mock::run_regression(design(), all_tests(), Some("parity::"));
+    let by = |n: &str| results.iter().find(|r| r.name == n).unwrap().outcome.clone();
+    assert_eq!(by("msg_matches"), Outcome::Passed, "the message contains what was expected");
+    match by("msg_does_not_match") {
+        Outcome::Failed(m) => assert!(m.contains("does not contain"), "{m}"),
+        o => panic!("a failure for the wrong reason must not pass: {o:?}"),
+    }
+    assert_eq!(by("times_out_on_purpose"), Outcome::Passed);
+    // finish_test() ended the test early, well before its 500us timeout.
+    assert_eq!(by("finished_by_a_child"), Outcome::Passed);
+    let t = results.iter().find(|r| r.name == "finished_by_a_child").unwrap();
+    assert!(t.sim_time_steps < 100, "ended at the child's call, not the timeout: {}", t.sim_time_steps);
+}
+
+#[test]
+fn filters_are_regular_expressions() {
+    use rivet_core::test::pattern_matches;
+    assert!(pattern_matches("counts$", "example::counter_counts"));
+    assert!(pattern_matches("^example::", "example::counter_counts"));
+    assert!(pattern_matches("count(er|ing)", "example::counter_counts"));
+    assert!(!pattern_matches("^counts", "example::counter_counts"));
+    // An invalid pattern is a plain substring, so a bracket in a parametrised
+    // test name still selects it.
+    assert!(pattern_matches("bursts[16]", "bus::axi_mem_bursts[16]"));
+}
+
+#[test]
+fn shuffle_is_reproducible_and_respects_stages() {
+    // Same seed, same order; different seed, different order (with enough
+    // tests for that to be overwhelmingly likely).
+    let order = |seed: u64| {
+        rivet_core::random::set_base_seed(seed);
+        std::env::set_var("RIVET_SHUFFLE", "1");
+        let v = all_tests();
+        std::env::remove_var("RIVET_SHUFFLE");
+        let stages: Vec<i32> = v.iter().map(|t| t.stage).collect();
+        let mut sorted = stages.clone();
+        sorted.sort();
+        assert_eq!(stages, sorted, "shuffling never moves a test out of its stage");
+        v.iter().map(|t| format!("{}::{}", t.module, t.name)).collect::<Vec<_>>()
+    };
+    let a = order(1234);
+    let b = order(1234);
+    let c = order(9999);
+    assert_eq!(a, b, "the same seed replays the same order");
+    assert_ne!(a, c, "a different seed shuffles differently");
+}
+
+#[test]
+fn results_xml_carries_the_source_location() {
+    let results = rivet_mock::run_regression(design(), all_tests(), Some("parity::msg_matches"));
+    let dir = std::env::temp_dir().join(format!("rivet-loc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("results.xml");
+    write_results_xml_with(&path, &results, "mock", -9).unwrap();
+    let xml = std::fs::read_to_string(&path).unwrap();
+    // The registration above is in this file, so the location points here.
+    assert!(xml.contains(r#"file="crates/rivet-mock/tests/regression.rs""#), "{xml}");
+    assert!(!xml.contains(r#"lineno="0""#), "{xml}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

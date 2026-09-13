@@ -5,13 +5,17 @@ mod randomize;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Expr, Ident, ItemFn, LitBool, LitInt, Token};
+use syn::{parse_macro_input, Expr, Ident, ItemFn, LitBool, LitInt, LitStr, Token};
 
 struct TestArgs {
     timeout: Option<Expr>,
     wall_timeout: Option<Expr>,
     skip: bool,
     expect_fail: bool,
+    /// `expect_fail = "message"`: the failure must say this.
+    expect_fail_msg: Option<String>,
+    /// `expect_timeout`: the test is expected to run out of simulated time.
+    expect_timeout: bool,
     stage: i32,
     /// `params = [a, b, c]`: one test per element, passed as the second
     /// argument.
@@ -28,6 +32,8 @@ impl Parse for TestArgs {
             wall_timeout: None,
             skip: false,
             expect_fail: false,
+            expect_fail_msg: None,
+            expect_timeout: false,
             stage: 0,
             params: None,
             param_sets: Vec::new(),
@@ -54,9 +60,25 @@ impl Parse for TestArgs {
                 "expect_fail" => {
                     if input.peek(Token![=]) {
                         input.parse::<Token![=]>()?;
-                        args.expect_fail = input.parse::<LitBool>()?.value;
+                        if input.peek(LitStr) {
+                            // `expect_fail = "overflow"`: the message must
+                            // contain this, so a test cannot pass by failing
+                            // for an unrelated reason.
+                            args.expect_fail_msg = Some(input.parse::<LitStr>()?.value());
+                            args.expect_fail = true;
+                        } else {
+                            args.expect_fail = input.parse::<LitBool>()?.value;
+                        }
                     } else {
                         args.expect_fail = true;
+                    }
+                }
+                "expect_timeout" => {
+                    if input.peek(Token![=]) {
+                        input.parse::<Token![=]>()?;
+                        args.expect_timeout = input.parse::<LitBool>()?.value;
+                    } else {
+                        args.expect_timeout = true;
                     }
                 }
                 "stage" => {
@@ -100,7 +122,8 @@ impl Parse for TestArgs {
 /// ```
 ///
 /// Attributes: `timeout = <Duration expr>` (simulated time),
-/// `wall_timeout = <seconds>`, `skip`, `expect_fail`, `stage = <i32>`,
+/// `wall_timeout = <seconds>`, `skip`, `expect_fail` (optionally
+/// `expect_fail = "part of the message"`), `expect_timeout`, `stage = <i32>`,
 /// `params = [v, ...]` (registers `name[v]` per value, passed as the second
 /// argument), `param_sets = ["a", ...]` (only under these `rivet.toml`
 /// parameter sets).
@@ -121,6 +144,11 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let skip = args.skip;
     let expect_fail = args.expect_fail;
+    let expect_fail_msg = match &args.expect_fail_msg {
+        Some(m) => quote! { Some(#m) },
+        None => quote! { None },
+    };
+    let expect_timeout = args.expect_timeout;
     let stage = args.stage;
     let wall_timeout = match &args.wall_timeout {
         Some(e) => quote! { Some((#e) as f64) },
@@ -178,6 +206,10 @@ pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
                     },
                     skip: #skip,
                     expect_fail: #expect_fail,
+                    expect_fail_msg: #expect_fail_msg,
+                    expect_timeout: #expect_timeout,
+                    file: file!(),
+                    line: line!(),
                     stage: #stage,
                     wall_timeout: #wall_timeout,
                     param_sets: &[#(#param_sets),*],

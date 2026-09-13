@@ -66,20 +66,20 @@ inventory::submit! {
         let clk = dut.signal("clk")?;
         let _mon = spawn_named("stuck_monitor", async { Timer::new(1.ms()).await; });
         loop { clk.rising_edge().await; }
-    }), timeout: || Some(100.ns()), skip: false, expect_fail: false, stage: 0, wall_timeout: None, param_sets: &[] }
+    }), timeout: || Some(100.ns()), ..TestDesc::DEFAULT }
 }
 
 inventory::submit! {
     TestDesc { name: "hangs_in_wall_time", module: "diag", run: |_dut: Module| boxed(async move {
         loop { Timer::steps(1).await; }
-    }), timeout: || None, skip: false, expect_fail: false, stage: 0, wall_timeout: Some(0.2), param_sets: &[] }
+    }), wall_timeout: Some(0.2), ..TestDesc::DEFAULT }
 }
 
 inventory::submit! {
     TestDesc { name: "finishes_in_time", module: "diag", run: |_dut: Module| boxed(async move {
         Timer::steps(10).await;
         Ok(())
-    }), timeout: || Some(1.us()), skip: false, expect_fail: false, stage: 0, wall_timeout: Some(30.0), param_sets: &[] }
+    }), timeout: || Some(1.us()), wall_timeout: Some(30.0), ..TestDesc::DEFAULT }
 }
 
 #[test]

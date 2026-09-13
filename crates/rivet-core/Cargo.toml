@@ -14,3 +14,4 @@ readme = "README.md"
 [dependencies]
 inventory = { workspace = true }
 log = { workspace = true }
+regex-lite = { workspace = true }

@@ -80,6 +80,8 @@ struct PendingWrite {
 
 pub(crate) struct CurrentTest {
     pub failure: Option<String>,
+    /// Set by [`finish_test`]: the test is over and it passed.
+    pub finished: bool,
     pub waker: Option<Waker>,
 }
 
@@ -422,6 +424,22 @@ pub fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// End the running test as passed, from any task. cocotb's `TestSuccess`.
+pub fn finish_test() {
+    let waker = with(|rt| {
+        if let Some(t) = rt.current_test.as_mut() {
+            t.finished = true;
+            t.waker.take()
+        } else {
+            log::error!("finish_test outside any test");
+            None
+        }
+    });
+    if let Some(w) = waker {
+        w.wake();
+    }
+}
+
 /// Record a failure against the running test and wake the test driver.
 pub fn report_failure(msg: String) {
     let waker = with(|rt| {
@@ -727,11 +745,19 @@ impl Runtime {
 /// test (a task panicked).
 pub struct TestFailed;
 
+/// Why the test driver woke: a failure recorded by any task, or a task
+/// calling [`finish_test`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestEnd {
+    Failed(String),
+    Finished,
+}
+
 impl Future for TestFailed {
-    type Output = String;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<String> {
+    type Output = TestEnd;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<TestEnd> {
         with(|rt| match rt.current_test.as_mut() {
-            Some(t) => match t.failure.clone() {
+            Some(t) => match t.failure.clone().map(TestEnd::Failed).or(t.finished.then_some(TestEnd::Finished)) {
                 Some(f) => Poll::Ready(f),
                 None => {
                     t.waker = Some(cx.waker().clone());
@@ -751,7 +777,7 @@ pub fn test_failed() -> TestFailed {
 
 /// Mark the start of a test so task panics are attributed to it.
 pub fn begin_test() {
-    with(|rt| rt.current_test = Some(CurrentTest { failure: None, waker: None }));
+    with(|rt| rt.current_test = Some(CurrentTest { failure: None, finished: false, waker: None }));
 }
 
 /// End the current test, returning any recorded failure.

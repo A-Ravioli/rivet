@@ -46,6 +46,8 @@ rivet-cli = { path = "crates/rivet-cli", version = "0.1.0" }
 # because a library carrying two of them fails to load.
 rivet = { path = "crates/rivet", version = "0.1.0", default-features = false }
 inventory = "0.3"
+# A small, dependency-free regular expression engine for test filters.
+regex-lite = "0.1"
 log = { version = "0.4", features = ["std"] }
 cc = "1"
 syn = { version = "2", features = ["full"] }

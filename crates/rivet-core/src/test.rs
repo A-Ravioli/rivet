@@ -7,7 +7,7 @@
 
 use crate::error::{Error, Result};
 use crate::handle::Module;
-use crate::runtime::{self, TestFailed};
+use crate::runtime::{self, TestEnd, TestFailed};
 use crate::time::{format_time, Duration, Unit};
 use crate::triggers::{first, Either, Timer};
 use std::future::Future;
@@ -25,6 +25,13 @@ pub struct TestDesc {
     pub timeout: fn() -> Option<Duration>,
     pub skip: bool,
     pub expect_fail: bool,
+    /// `expect_fail = "..."`: the failure message must contain this.
+    pub expect_fail_msg: Option<&'static str>,
+    /// The test is expected to run out of simulated time.
+    pub expect_timeout: bool,
+    /// Source location, for `results.xml` and for editors.
+    pub file: &'static str,
+    pub line: u32,
     /// Tests are stable-sorted by stage.
     pub stage: i32,
     /// Wall-clock limit in seconds (`RIVET_WALL_TIMEOUT` applies when `None`).
@@ -34,6 +41,57 @@ pub struct TestDesc {
 }
 
 inventory::collect!(TestDesc);
+
+fn nothing_to_run(_dut: Module) -> TestFuture {
+    boxed(async { Ok(()) })
+}
+
+fn no_timeout() -> Option<Duration> {
+    None
+}
+
+impl TestResult {
+    /// A passed result with everything else empty, for tests and for
+    /// callers that build results by hand.
+    pub fn new(name: &str, module: &str, outcome: Outcome) -> TestResult {
+        TestResult {
+            name: name.to_string(),
+            module: module.to_string(),
+            outcome,
+            sim_time_steps: 0,
+            wall_secs: 0.0,
+            seed: 0,
+            file: String::new(),
+            line: 0,
+        }
+    }
+}
+
+impl TestDesc {
+    /// Defaults for a hand-written registration, for struct update syntax:
+    ///
+    /// ```ignore
+    /// TestDesc { name: "t", module: "m", run: |_| boxed(async { Ok(()) }), ..TestDesc::DEFAULT }
+    /// ```
+    ///
+    /// `#[rivet::test]` fills every field itself; this keeps hand-written
+    /// registrations (and tests of the runner) working as fields are added.
+    pub const DEFAULT: TestDesc = TestDesc {
+        name: "",
+        module: "",
+        run: nothing_to_run,
+        timeout: no_timeout,
+        skip: false,
+        expect_fail: false,
+        expect_fail_msg: None,
+        expect_timeout: false,
+        stage: 0,
+        wall_timeout: None,
+        param_sets: &[],
+        file: "",
+        line: 0,
+    };
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -51,6 +109,9 @@ pub struct TestResult {
     pub wall_secs: f64,
     /// The test's random seed (derived from the run's base seed).
     pub seed: u64,
+    /// Where the test is written, from `file!()` and `line!()`.
+    pub file: String,
+    pub line: u32,
 }
 
 /// All tests visible to this binary, in execution order.
@@ -59,13 +120,21 @@ pub fn all_tests() -> Vec<&'static TestDesc> {
     // Link order is not deterministic across builds; sort by stage, then
     // module and name, so runs on different simulators agree.
     v.sort_by(|a, b| a.stage.cmp(&b.stage).then_with(|| a.module.cmp(b.module)).then_with(|| a.name.cmp(b.name)));
+    if shuffle_requested() {
+        // Reproducible from the run's seed, and still stage by stage, so a
+        // shuffled run can be replayed exactly with --seed.
+        shuffle_within_stages(&mut v);
+    }
     v
 }
 
-/// Test selection: `filter` is a comma-separated list of substrings; a
-/// test runs if any of them matches its name or `module::name`. An empty
-/// or absent filter selects everything.
+/// Test selection: `filter` is a comma-separated list of patterns, each a
+/// regular expression searched (not anchored) against `module::name`, as
+/// cocotb's `COCOTB_TEST_FILTER` is. A pattern that is not a valid regular
+/// expression falls back to a substring match, so plain names keep working.
+/// An empty or absent filter selects everything.
 pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
+    // A test tied to parameter sets runs only under one of them.
     if !t.param_sets.is_empty() {
         match param_set() {
             Some(set) if t.param_sets.contains(&set.as_str()) => {}
@@ -81,16 +150,51 @@ pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
         }
     }
     match filter {
-        Some(f) if !f.trim().is_empty() => f
-            .split(',')
-            .map(str::trim)
-            .any(|pat| t.name == pat || t.name.contains(pat) || format!("{}::{}", t.module, t.name).contains(pat)),
+        Some(f) if !f.trim().is_empty() => {
+            let full = format!("{}::{}", t.module, t.name);
+            f.split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .any(|pat| pattern_matches(pat, &full) || pattern_matches(pat, t.name))
+        }
         _ => true,
     }
 }
 
-/// The manifest parameter set this process was built for
-/// (`RIVET_PARAM_SET`), if any.
+/// `re.search` semantics, plus a literal substring fallback.
+pub fn pattern_matches(pattern: &str, text: &str) -> bool {
+    if let Ok(re) = regex_lite::Regex::new(pattern) {
+        if re.is_match(text) {
+            return true;
+        }
+    }
+    // Fall back to a literal match, so a name that is also valid regular
+    // expression syntax still selects itself: `axi_mem_bursts[16]` is a
+    // character class to a regular expression engine, and a test name to
+    // the person typing it.
+    text.contains(pattern)
+}
+
+/// Shuffle tests within each stage, reproducibly from the run's base seed.
+/// cocotb's `COCOTB_RANDOM_TEST_ORDER`; `RIVET_SHUFFLE=1` turns it on.
+pub fn shuffle_requested() -> bool {
+    matches!(std::env::var("RIVET_SHUFFLE").ok().as_deref(), Some("1") | Some("true") | Some("yes"))
+}
+
+fn shuffle_within_stages(tests: &mut [&'static TestDesc]) {
+    let mut rng = crate::random::Rng::seed_from_u64(crate::random::base_seed() ^ 0x5348_5546_464c_4521);
+    let mut start = 0;
+    while start < tests.len() {
+        let stage = tests[start].stage;
+        let mut end = start;
+        while end < tests.len() && tests[end].stage == stage {
+            end += 1;
+        }
+        rng.shuffle(&mut tests[start..end]);
+        start = end;
+    }
+}
+
 pub fn param_set() -> Option<String> {
     std::env::var("RIVET_PARAM_SET").ok().filter(|s| !s.is_empty())
 }
@@ -128,6 +232,8 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
                 sim_time_steps: 0,
                 wall_secs: 0.0,
                 seed: 0,
+                file: t.file.to_string(),
+                line: t.line,
             });
             continue;
         }
@@ -174,11 +280,18 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             (Outcome::Passed, Some(f)) => Outcome::Failed(f),
             (o, _) => o,
         };
-        let outcome = match (t.expect_fail, outcome) {
-            (true, Outcome::Failed(msg)) => {
-                log::info!("{}::{} failed as expected: {msg}", t.module, t.name);
-                Outcome::Passed
-            }
+        let expects_failure = t.expect_fail || t.expect_timeout || t.expect_fail_msg.is_some();
+        let wanted = t.expect_fail_msg.or(if t.expect_timeout { Some("timed out after") } else { None });
+        let outcome = match (expects_failure, outcome) {
+            (true, Outcome::Failed(msg)) => match wanted {
+                Some(w) if !msg.contains(w) => {
+                    Outcome::Failed(format!("failed as expected, but the message does not contain {w:?}: {msg}"))
+                }
+                _ => {
+                    log::info!("{}::{} failed as expected: {msg}", t.module, t.name);
+                    Outcome::Passed
+                }
+            },
             (true, Outcome::Passed) => Outcome::Failed("test passed but was expected to fail".into()),
             (true, Outcome::Skipped) => Outcome::Skipped,
             (_, o) => o,
@@ -203,6 +316,8 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             sim_time_steps,
             wall_secs: wall.elapsed().as_secs_f64(),
             seed,
+            file: t.file.to_string(),
+            line: t.line,
         });
     }
     results
@@ -218,7 +333,9 @@ async fn run_one(handle: crate::task::JoinHandle<Result<()>>, timeout: Option<(D
             }
             Either::Left(Ok(Err(e))) => Outcome::Failed(e.to_string()),
             Either::Left(Err(e)) => Outcome::Failed(e.to_string()),
-            Either::Right(msg) => Outcome::Failed(msg),
+            Either::Right(TestEnd::Failed(msg)) => Outcome::Failed(msg),
+            // A task called `finish_test()`: the test is over and passed.
+            Either::Right(TestEnd::Finished) => Outcome::Passed,
         }
     };
     match timeout {
@@ -362,9 +479,11 @@ pub fn write_results_xml_with(
         for r in in_module {
             writeln!(
                 s,
-                r#"    <testcase name="{}" classname="{}" file="" lineno="0" time="{:.6}">"#,
+                r#"    <testcase name="{}" classname="{}" file="{}" lineno="{}" time="{:.6}">"#,
                 xml(&r.name),
                 xml(&r.module),
+                xml(&r.file),
+                r.line,
                 r.wall_secs
             )
             .unwrap();
@@ -590,13 +709,15 @@ pub fn results_json(results: &[TestResult], sim: &str, precision: i32) -> String
         };
         let _ = write!(
             s,
-            "{{\"name\":{},\"module\":{},\"outcome\":\"{outcome}\",\"message\":{},\"sim_time_steps\":{},\"wall_secs\":{},\"seed\":{}}}",
+            "{{\"name\":{},\"module\":{},\"outcome\":\"{outcome}\",\"message\":{},\"sim_time_steps\":{},\"wall_secs\":{},\"seed\":{},\"file\":{},\"line\":{}}}",
             json_str(&r.name),
             json_str(&r.module),
             json_str(&message),
             r.sim_time_steps,
             r.wall_secs,
-            r.seed
+            r.seed,
+            json_str(&r.file),
+            r.line
         );
     }
     s.push_str("]}");
@@ -643,17 +764,7 @@ mod tests {
     use super::*;
 
     fn desc(name: &'static str, module: &'static str, stage: i32) -> TestDesc {
-        TestDesc {
-            name,
-            module,
-            run: |_| boxed(async { Ok(()) }),
-            timeout: || None,
-            skip: false,
-            expect_fail: false,
-            stage,
-            wall_timeout: None,
-            param_sets: &[],
-        }
+        TestDesc { name, module, stage, ..TestDesc::DEFAULT }
     }
 
     #[test]
@@ -679,6 +790,8 @@ mod tests {
                 sim_time_steps: 1500,
                 wall_secs: 0.5,
                 seed: 1,
+                file: "src/lib.rs".into(),
+                line: 10,
             },
             TestResult {
                 name: "b<>&\"".into(),
@@ -687,15 +800,10 @@ mod tests {
                 sim_time_steps: 0,
                 wall_secs: 0.25,
                 seed: 2,
+                file: "src/lib.rs".into(),
+                line: 20,
             },
-            TestResult {
-                name: "c".into(),
-                module: "n".into(),
-                outcome: Outcome::Skipped,
-                sim_time_steps: 0,
-                wall_secs: 0.0,
-                seed: 0,
-            },
+            TestResult::new("c", "n", Outcome::Skipped),
         ];
         let dir = std::env::temp_dir().join(format!("rivet-xml-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
