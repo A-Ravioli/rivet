@@ -20,6 +20,8 @@ pub mod check;
 pub mod handshake;
 pub mod memory;
 pub mod model;
+#[cfg(feature = "python")]
+pub mod python;
 pub mod reset;
 pub mod scoreboard;
 pub mod trace;
@@ -31,6 +33,8 @@ pub use check::{
 pub use handshake::{ValidReadySink, ValidReadySource};
 pub use memory::{load_hex_into, Memory};
 pub use model::{Model, ModelScoreboard};
+#[cfg(feature = "python")]
+pub use python::PyModel;
 pub use reset::Reset;
 pub use scoreboard::Scoreboard;
 pub use trace::Trace;

@@ -14,3 +14,9 @@ readme = "README.md"
 [dependencies]
 rivet-core = { workspace = true }
 log = { workspace = true }
+# Optional: a Python function as a reference model. Enabling this links
+# libpython into the test library, so it is off by default.
+pyo3 = { version = "0.23", features = ["auto-initialize"], optional = true }
+
+[features]
+python = ["dep:pyo3"]

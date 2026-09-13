@@ -56,6 +56,10 @@ pub struct Opts {
     pub update_golden: bool,
     /// Shuffle the test order within each stage, reproducibly from the seed.
     pub shuffle: bool,
+    /// Run the simulator's own GUI (commercial tools only).
+    pub gui: bool,
+    /// Open the waveform in a viewer when the run finishes.
+    pub wave_open: bool,
     /// Put this run's results and logs in `sim_build/<sim>/<suffix>/` while
     /// the design build stays shared. Used when one process runs one test,
     /// as `cargo nextest` does.
@@ -96,6 +100,8 @@ impl Opts {
             cov_threshold: None,
             update_golden: false,
             shuffle: false,
+            gui: false,
+            wave_open: false,
             run_dir_suffix: None,
             dump: None,
             out: None,
@@ -129,6 +135,8 @@ pub fn usage() -> ! {
          \x20 --cov-threshold <pct>      fail the run below this functional coverage\n\
          \x20 --update-golden            rewrite golden trace files from this run\n\
          \x20 --shuffle                  shuffle test order within each stage (reproducible from --seed)\n\
+         \x20 --gui                      run the simulator's own GUI (Questa, Xcelium, VCS)\n\
+         \x20 --wave-open                open the waveform in a viewer when the run finishes\n\
          \x20 --manifest <rivet.toml>    design description (default: next to or above the crate)\n\
          \x20 --path <dir>               new: depend on a Rivet checkout instead of crates.io\n\
          \x20 -o <file>                  bindgen: output file (default src/dut.rs)\n\
@@ -179,6 +187,14 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
             "--cov-threshold" | "--threshold" => o.cov_threshold = Some(num(it.next(), "--cov-threshold")),
             "--update-golden" => o.update_golden = true,
             "--shuffle" => o.shuffle = true,
+            "--gui" => {
+                o.gui = true;
+                o.waves = true;
+            }
+            "--wave-open" => {
+                o.wave_open = true;
+                o.waves = true;
+            }
             "-o" | "--out" => o.out = it.next().map(PathBuf::from),
             "--manifest" => o.manifest = it.next().map(PathBuf::from),
             "--path" => o.rivet_path = it.next().map(PathBuf::from),
@@ -462,7 +478,7 @@ fn build_commercial(m: &Manifest, opts: &Opts, sim_dir: &Path, so: &Path) -> Res
                 run("vlog", args)?;
             }
             let mut args = vec![
-                "-c".into(),
+                if opts.gui { "-gui".into() } else { "-c".into() },
                 "-pli".into(),
                 so.clone(),
                 // Without full access the harness sees no handles.
@@ -474,7 +490,8 @@ fn build_commercial(m: &Manifest, opts: &Opts, sim_dir: &Path, so: &Path) -> Res
             args.extend(cfg.run_args.iter().cloned());
             args.push(format!("work.{top}"));
             args.push("-do".into());
-            args.push("run -all; quit -f".into());
+            // In the GUI the user drives the run, so do not quit at the end.
+            args.push(if opts.gui { "run -all".into() } else { "run -all; quit -f".to_string() });
             Launch::External { program: "vsim".into(), args }
         }
         "xcelium" => {
@@ -490,6 +507,9 @@ fn build_commercial(m: &Manifest, opts: &Opts, sim_dir: &Path, so: &Path) -> Res
             for (k, v) in &params {
                 args.push("-defparam".into());
                 args.push(format!("{top}.{k}={v}"));
+            }
+            if opts.gui {
+                args.push("-gui".into());
             }
             args.extend(cfg.args.iter().cloned());
             args.extend(sources.clone());
@@ -969,6 +989,38 @@ fn run_set(
 }
 
 /// Run `build`, `run`, or a `bindgen` dump according to `opts`.
+/// Open the waveform a run produced in whatever viewer is installed. The
+/// open tools have no GUI of their own, so this is how `--wave-open` shows
+/// a failing run.
+fn open_waveform(dir: &Path, top: &str) {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for ext in ["fst", "vcd", "ghw"] {
+        candidates.push(dir.join(format!("{top}.{ext}")));
+    }
+    // A per-test dump, if that is all there is.
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if matches!(p.extension().and_then(|s| s.to_str()), Some("fst" | "vcd" | "ghw")) {
+                candidates.push(p);
+            }
+        }
+    }
+    let Some(wave) = candidates.into_iter().find(|p| p.exists()) else {
+        eprintln!("rivet: no waveform to open in {}", dir.display());
+        return;
+    };
+    for viewer in ["surfer", "gtkwave"] {
+        let ok = Command::new(viewer).arg(&wave).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+        if let Ok(mut child) = ok {
+            eprintln!("rivet: opened {} in {viewer}", wave.display());
+            let _ = child.wait();
+            return;
+        }
+    }
+    eprintln!("rivet: no waveform viewer found (tried surfer and gtkwave); the dump is {}", wave.display());
+}
+
 /// A lock held while the design is built, so several harness processes
 /// (one per test, as `cargo nextest` runs them) do not build into the same
 /// directory at once.
@@ -1132,6 +1184,9 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
         write_results_xml_with(&results_path, &all, &opts.sim, precision).map_err(|e| e.to_string())?;
         eprintln!("rivet: merged results");
         summarize_with(&all, precision);
+    }
+    if opts.wave_open {
+        open_waveform(&out_base, &m.design.top);
     }
     let mut code = ExitCode::SUCCESS;
     let failures = all.iter().filter(|r| matches!(r.outcome, Outcome::Failed(_))).count();

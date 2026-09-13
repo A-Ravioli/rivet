@@ -61,6 +61,18 @@ jobs:
           target/debug/rivet run --sim icarus -C examples/bench
           target/debug/rivet run --sim verilator -C examples/bench
 
+  python-model:
+    name: python reference-model bridge
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Kit tests with an embedded interpreter
+        run: cargo test -p rivet-kit --features python
+
   msrv:
     name: minimum supported Rust version
     runs-on: ubuntu-24.04
