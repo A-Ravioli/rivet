@@ -3,7 +3,13 @@ name = "rivet-verilator"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Verilator in-process backend for Rivet: build helper and simulation main loop"
+description = "Verilator backend and build helper for Rivet"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
 
 [dependencies]
 rivet-core = { workspace = true }

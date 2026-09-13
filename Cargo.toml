@@ -23,19 +23,23 @@ exclude = ["python/rivet_py"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.87"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/A-Ravioli/rivet"
+homepage = "https://github.com/A-Ravioli/rivet"
+categories = ["development-tools::testing", "simulation"]
+keywords = ["hdl", "verilog", "vhdl", "verification", "cocotb"]
 
 [workspace.dependencies]
-rivet-core = { path = "crates/rivet-core" }
-rivet-mock = { path = "crates/rivet-mock" }
-rivet-macros = { path = "crates/rivet-macros" }
-rivet-vpi = { path = "crates/rivet-vpi" }
-rivet-verilator = { path = "crates/rivet-verilator" }
-rivet-manifest = { path = "crates/rivet-manifest" }
-rivet-kit = { path = "crates/rivet-kit" }
-rivet-cli = { path = "crates/rivet-cli" }
-rivet = { path = "crates/rivet" }
+rivet-core = { path = "crates/rivet-core", version = "0.1.0" }
+rivet-mock = { path = "crates/rivet-mock", version = "0.1.0" }
+rivet-macros = { path = "crates/rivet-macros", version = "0.1.0" }
+rivet-vpi = { path = "crates/rivet-vpi", version = "0.1.0" }
+rivet-verilator = { path = "crates/rivet-verilator", version = "0.1.0" }
+rivet-manifest = { path = "crates/rivet-manifest", version = "0.1.0" }
+rivet-kit = { path = "crates/rivet-kit", version = "0.1.0" }
+rivet-cli = { path = "crates/rivet-cli", version = "0.1.0" }
+rivet = { path = "crates/rivet", version = "0.1.0" }
 inventory = "0.3"
 log = { version = "0.4", features = ["std"] }
 cc = "1"

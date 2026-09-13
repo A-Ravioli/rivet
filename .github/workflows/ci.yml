@@ -56,6 +56,32 @@ jobs:
           target/debug/rivet run --sim icarus -C examples/bench
           target/debug/rivet run --sim verilator -C examples/bench
 
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - name: Check the workspace on the MSRV
+        run: cargo check --workspace --all-targets
+
+  packaging:
+    name: crates package cleanly
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Metadata crates.io requires
+        run: python3 ci/check-package-metadata.py
+      - name: Package the crates with no internal dependencies
+        # The rest cannot be packaged until their path dependencies exist in
+        # the registry, which happens during the first release.
+        run: |
+          set -eu
+          for c in rivet-core rivet-macros rivet-manifest; do
+            cargo package -p "$c" --no-verify
+          done
+
   python-integrations:
     # The Edalize/FuseSoC backend and the rivet_py shim for cocotb.
     runs-on: ubuntu-24.04

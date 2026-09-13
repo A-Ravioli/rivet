@@ -3,7 +3,13 @@ name = "rivet"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Rust hardware verification harness replacing cocotb"
+description = "The Rivet hardware verification harness: async tests for Verilog and VHDL designs"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
 
 [dependencies]
 rivet-core = { workspace = true }

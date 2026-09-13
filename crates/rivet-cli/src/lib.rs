@@ -13,6 +13,7 @@
 
 pub mod bindgen;
 pub mod cov;
+pub mod new;
 pub mod typedefs;
 pub mod watch;
 
@@ -58,6 +59,8 @@ pub struct Opts {
     pub out: Option<PathBuf>,
     /// An explicit `rivet.toml` (default: found next to or above the crate).
     pub manifest: Option<PathBuf>,
+    /// `rivet new --path <dir>`: depend on a Rivet checkout, not crates.io.
+    pub rivet_path: Option<PathBuf>,
 }
 
 impl Opts {
@@ -89,13 +92,14 @@ impl Opts {
             dump: None,
             out: None,
             manifest: std::env::var("RIVET_MANIFEST").ok().filter(|s| !s.is_empty()).map(PathBuf::from),
+            rivet_path: None,
         }
     }
 }
 
 pub fn usage() -> ! {
     eprintln!(
-        "usage: rivet <run|build|watch|bindgen|cov|clean> [options] [-- sim args]\n\
+        "usage: rivet <new|run|build|watch|bindgen|cov|clean> [options] [-- sim args]\n\
          \n\
          options:\n\
          \x20 --sim <icarus|verilator|ghdl>  simulator (default: icarus)\n\
@@ -116,10 +120,12 @@ pub fn usage() -> ! {
          \x20 --cov-threshold <pct>      fail the run below this functional coverage\n\
          \x20 --update-golden            rewrite golden trace files from this run\n\
          \x20 --manifest <rivet.toml>    design description (default: next to or above the crate)\n\
+         \x20 --path <dir>               new: depend on a Rivet checkout instead of crates.io\n\
          \x20 -o <file>                  bindgen: output file (default src/dut.rs)\n\
          \x20 -v                         verbose\n\
          \n\
          commands:\n\
+         \x20 new <name>   scaffold a testbench crate that runs as generated\n\
          \x20 run          build everything and run the tests\n\
          \x20 build        build without running\n\
          \x20 watch        run, then rerun whenever a source file changes\n\
@@ -164,6 +170,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
             "--update-golden" => o.update_golden = true,
             "-o" | "--out" => o.out = it.next().map(PathBuf::from),
             "--manifest" => o.manifest = it.next().map(PathBuf::from),
+            "--path" => o.rivet_path = it.next().map(PathBuf::from),
             "-v" | "--verbose" => o.verbose = true,
             "-h" | "--help" => usage(),
             "--" => {
@@ -178,7 +185,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
                 usage()
             }
             s if o.cmd.is_empty() => o.cmd = s.to_string(),
-            s if o.cmd == "cov" && o.sub.is_empty() => o.sub = s.to_string(),
+            s if (o.cmd == "cov" || o.cmd == "new") && o.sub.is_empty() => o.sub = s.to_string(),
             s if o.cmd == "cov" => o.files.push(PathBuf::from(s)),
             s => {
                 eprintln!("unexpected argument {s}");
@@ -763,6 +770,21 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
         let code = bindgen::generate(&json, None, &m.sources_abs())?;
         let out = opts.out.clone().unwrap_or_else(|| pkg.manifest_dir.join("src").join("dut.rs"));
         std::fs::write(&out, code).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
+        // Format the bindings when rustfmt is available, so a committed
+        // `dut.rs` matches what `cargo fmt` would produce and regenerating
+        // it does not show up as a diff.
+        let fmt = Command::new("rustfmt")
+            .arg("--edition")
+            .arg("2021")
+            .arg(&out)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if let Ok(st) = fmt {
+            if !st.success() && opts.verbose {
+                eprintln!("rivet: rustfmt declined to format {}", out.display());
+            }
+        }
         eprintln!("rivet: wrote {}", out.display());
         return Ok(ExitCode::SUCCESS);
     }
@@ -877,6 +899,20 @@ pub fn watch(opts: &Opts) -> Result<ExitCode, String> {
 pub fn main_with_args(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut opts = parse_args(args);
     let r = match opts.cmd.as_str() {
+        "new" => {
+            if opts.sub.is_empty() {
+                Err("rivet new needs a name: `rivet new my-tb`".to_string())
+            } else {
+                new::scaffold(&opts.sub, &opts.dir, opts.rivet_path.as_deref()).map(|root| {
+                    println!(
+                        "rivet: created {}\nrivet: next: cd {} && rivet run --sim icarus",
+                        root.display(),
+                        root.file_name().and_then(|s| s.to_str()).unwrap_or(".")
+                    );
+                    ExitCode::SUCCESS
+                })
+            }
+        }
         "run" | "build" => run(&opts),
         "watch" => watch(&opts),
         "bindgen" => {

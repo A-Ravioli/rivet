@@ -9,3 +9,4 @@ __pycache__/
 *.egg-info/
 python/rivet_py/target/
 python/rivet_py/dist/
+examples/*/src/dut.generated.*.rs

@@ -3,7 +3,13 @@ name = "rivet-kit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Verification components for Rivet: drivers, monitors, scoreboards, handshakes"
+description = "Verification components for Rivet: drivers, monitors, scoreboards, bus models, checkers"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
 
 [dependencies]
 rivet-core = { workspace = true }

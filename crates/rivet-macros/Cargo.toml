@@ -3,6 +3,13 @@ name = "rivet-macros"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Attribute and derive macros for Rivet testbenches"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
 
 [lib]
 proc-macro = true

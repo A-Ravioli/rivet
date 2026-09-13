@@ -2,15 +2,34 @@
 //! Each test skips itself when the simulator it needs is not installed, so
 //! `cargo test --workspace` stays green on a machine without EDA tools.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
+/// Tests that drive the same example crate share one `sim_build` directory,
+/// so they must not run at the same time. One lock per example keeps tests
+/// on different examples parallel.
+fn example_lock(name: &str) -> MutexGuard<'static, ()> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, &'static Mutex<()>>>> = OnceLock::new();
+    let map = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let m = {
+        let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
+        *map.entry(name.to_string()).or_insert_with(|| Box::leak(Box::new(Mutex::new(()))))
+    };
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
 fn have(tool: &str) -> bool {
-    Command::new(tool).arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    // Icarus rejects `--version` (it wants `-V`), so a single probe flag
+    // silently skipped every Icarus test. Try both.
+    ["--version", "-V"]
+        .iter()
+        .any(|flag| Command::new(tool).arg(flag).output().map(|o| o.status.success()).unwrap_or(false))
 }
 
 fn rivet() -> Command {
@@ -30,6 +49,7 @@ fn results(example: &str, sim: &str) -> String {
 
 #[test]
 fn icarus_conformance_run_and_results() {
+    let _lock = example_lock("conformance");
     if !have("iverilog") {
         eprintln!("skipping: iverilog not installed");
         return;
@@ -46,6 +66,7 @@ fn icarus_conformance_run_and_results() {
 
 #[test]
 fn icarus_filter_and_hdl_finish() {
+    let _lock = example_lock("conformance");
     if !have("iverilog") {
         eprintln!("skipping: iverilog not installed");
         return;
@@ -63,6 +84,7 @@ fn icarus_filter_and_hdl_finish() {
 
 #[test]
 fn icarus_waves_and_bindgen() {
+    let _lock = example_lock("dff");
     if !have("iverilog") {
         eprintln!("skipping: iverilog not installed");
         return;
@@ -82,6 +104,7 @@ fn icarus_waves_and_bindgen() {
 
 #[test]
 fn cli_errors() {
+    let _lock = example_lock("dff");
     let (code, text) = run(&["run", "--sim", "nonesuch", "-C", "examples/dff"]);
     assert_eq!(code, 2, "{text}");
     assert!(text.contains("unsupported simulator"), "{text}");
@@ -94,6 +117,7 @@ fn cli_errors() {
 
 #[test]
 fn verilator_conformance() {
+    let _lock = example_lock("conformance");
     if !have("verilator") {
         eprintln!("skipping: verilator not installed");
         return;
@@ -105,6 +129,7 @@ fn verilator_conformance() {
 
 #[test]
 fn ghdl_vhdl_example() {
+    let _lock = example_lock("dff_vhdl");
     if !have("ghdl") {
         eprintln!("skipping: ghdl not installed");
         return;
@@ -118,6 +143,7 @@ fn ghdl_vhdl_example() {
 /// coverage, golden traces, and the coverage threshold.
 #[test]
 fn icarus_bus_example_sharded_with_param_sets_and_coverage() {
+    let _lock = example_lock("bus");
     if !have("iverilog") {
         eprintln!("skipping: iverilog not installed");
         return;
@@ -134,7 +160,13 @@ fn icarus_bus_example_sharded_with_param_sets_and_coverage() {
     assert!(!xml.contains(r#"<testcase name="regs_reset_to_param@init0""#), "param_sets restricts the test");
     assert!(xml.contains(r#"<testcase name="axi_mem_bursts[16]@init0""#), "params register one test per value");
     assert!(xml.contains(r#"<property name="random_seed""#));
-    // An unreachable threshold fails the run without hiding results.
+    // cov report merges the run above and applies its own threshold. This
+    // has to come before any filtered run, which clears the merged file.
+    let (code, text) = run(&["cov", "report", "-C", "examples/bus", "--sim", "icarus", "--threshold", "100"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("TOTAL 36/36 bins (100.00%)"), "{text}");
+    // An unreachable threshold fails the run without hiding results, and a
+    // run that records no coverage leaves no stale coverage.json behind.
     let (code, text) = run(&[
         "run",
         "--sim",
@@ -150,10 +182,7 @@ fn icarus_bus_example_sharded_with_param_sets_and_coverage() {
     ]);
     assert_eq!(code, 1, "{text}");
     assert!(text.contains("no coverage recorded"), "{text}");
-    // cov report merges and applies its own threshold.
-    let (code, text) = run(&["cov", "report", "-C", "examples/bus", "--sim", "icarus", "--threshold", "100"]);
-    assert_eq!(code, 0, "{text}");
-    assert!(text.contains("TOTAL 36/36 bins (100.00%)"), "{text}");
+    assert!(!repo_root().join("examples/bus/sim_build/icarus/coverage.json").exists());
     // A changed golden is reported with a diff and the actual trace.
     let golden = repo_root().join("examples/bus/golden/example_bus_axil_golden_trace@init0__axil.trace");
     let saved = std::fs::read_to_string(&golden).unwrap();
@@ -169,6 +198,7 @@ fn icarus_bus_example_sharded_with_param_sets_and_coverage() {
 
 #[test]
 fn watch_runs_once_and_cargo_rivet_alias() {
+    let _lock = example_lock("dff");
     if !have("iverilog") {
         eprintln!("skipping: iverilog not installed");
         return;
@@ -196,11 +226,14 @@ fn watch_runs_once_and_cargo_rivet_alias() {
 
 #[test]
 fn bindgen_emits_typedefs() {
+    let _lock = example_lock("bus");
     if !have("iverilog") {
         eprintln!("skipping: iverilog not installed");
         return;
     }
-    let out = std::env::temp_dir().join(format!("rivet-bindgen-bus-{}.rs", std::process::id()));
+    // Inside the repo, so rustfmt picks up the workspace rustfmt.toml and
+    // the output is comparable with the committed, formatted bindings.
+    let out = repo_root().join("examples/bus/src").join(format!("dut.generated.{}.rs", std::process::id()));
     let (code, text) = run(&["bindgen", "--sim", "icarus", "-C", "examples/bus", "-o", out.to_str().unwrap()]);
     assert_eq!(code, 0, "{text}");
     let generated = std::fs::read_to_string(&out).unwrap();
@@ -213,4 +246,27 @@ fn bindgen_emits_typedefs() {
     let committed = std::fs::read_to_string(repo_root().join("examples/bus/src/dut.rs")).unwrap();
     assert_eq!(committed, generated, "examples/bus/src/dut.rs is stale; rerun rivet bindgen");
     let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn rivet_new_scaffolds_a_crate_that_runs() {
+    if !have("iverilog") {
+        eprintln!("skipping: iverilog not installed");
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("rivet-new-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let root = repo_root();
+
+    // Scaffold against this checkout so the generated crate needs no registry.
+    let out = rivet().args(["new", "demo", "-C"]).arg(&tmp).arg("--path").arg(&root).output().expect("rivet new");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // It runs as generated, with no edits.
+    let out = rivet().args(["run", "--sim", "icarus", "-C"]).arg(tmp.join("demo")).output().expect("rivet run");
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("RIVET_RESULT passed=2 failed=0"), "{text}");
+    let _ = std::fs::remove_dir_all(&tmp);
 }
