@@ -127,6 +127,15 @@ more, all in the tooling and the tests themselves:
 16. **The bus CLI test cleared `coverage.json` before asserting on `cov
     report`.** A filtered run with no covergroups correctly leaves no file
     (defect 11), and the test that did so ran first. The order is fixed.
+17. **The runner asked for `lib<name>.so` on macOS**, where Cargo writes
+    `lib<name>.dylib`, so every Icarus, GHDL, NVC and commercial run died
+    with "cannot copy ...: No such file or directory" before the simulator
+    started. Found by the new macOS job; a unit test now pins the library
+    name per platform.
+18. **The Verilator shim asked the linker for `-lstdc++` on macOS**, which
+    ships `libc++`, so every Verilator target failed to link there. The
+    build script already distinguishes Mach-O for the `--start-group`
+    question and now uses it here too.
 
 Test-writing again caught timing-model mistakes (writes in the ReadOnly
 phase after a checker or a `read_only().await`), which is why the immediate
