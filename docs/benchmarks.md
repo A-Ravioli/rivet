@@ -121,6 +121,38 @@ Spreads above 20% on the shortest benchmarks are the container's
 scheduling noise, not the harness: `timer_only` is a fifth of a
 microsecond per cycle, where a single descheduling event moves the number.
 
+## Edit to result
+
+What a testbench author actually waits for, measured by `ci/loop-latency.py`
+on `examples/dff` (one test selected, so the number is the loop and not the
+suite):
+
+| Edit | Icarus | Verilator |
+|---|---|---|
+| nothing changed | 0.1 s | 0.1 s |
+| one line in the test crate | 0.4 s | 0.6 s |
+| one line in the HDL | 0.4 s | 12.5 s |
+| everything, from clean | 0.8 s | 13.0 s |
+
+The Rust rebuild is not the cost it was assumed to be: a test-only edit is
+under a second on both simulators, because cargo rebuilds one small crate
+and relinks. What costs twelve seconds is Verilator compiling the design
+again after an HDL edit, which is Verilator's own work and would not be
+helped by anything Rivet does differently. `rivet watch` keeps the loop to
+the numbers above without retyping the command.
+
+Python has no compile step at all, so cocotb's test-edit loop is shorter
+than 0.4 s. That gap is real; it is a fraction of a second, not the several
+seconds it was assumed to be, which is why Rivet does not load the test
+library dynamically to shave it.
+
+Reproduce with:
+
+```sh
+ci/loop-latency.py --sim icarus --example dff --filter counter
+ci/loop-latency.py --sim verilator --example dff --filter counter
+```
+
 ## What these numbers are not
 
 - The cocotb comparison tables are one run each; the Rivet numbers above

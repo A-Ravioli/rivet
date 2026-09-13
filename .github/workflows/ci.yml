@@ -35,6 +35,18 @@ jobs:
         run: |
           cargo test -p example-dff -- --list
           cargo test -p example-dff
+      - name: Edit-to-result latency stays under a second for a test edit
+        run: |
+          python3 ci/loop-latency.py --sim icarus --example dff --filter counter | tee loop.txt
+          python3 - <<'EOF'
+          import re, sys
+          text = open("loop.txt").read()
+          m = re.search(r"^test\s+([\d.]+)$", text, re.M)
+          assert m, text
+          secs = float(m.group(1))
+          print(f"test-only edit: {secs}s")
+          sys.exit(1 if secs > 5.0 else 0)
+          EOF
       - name: cargo nextest lists and runs the same tests
         run: |
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin

@@ -15,14 +15,23 @@ Rivet and lists the things that have no direct equivalent.
 | `@cocotb.test()` | `#[rivet::test]` on an `async fn(dut: Module) -> rivet::Result<()>` |
 | `@cocotb.test(timeout_time=10, timeout_unit="us")` | `#[rivet::test(timeout = 10.us())]` |
 | `@cocotb.test(expect_fail=True)` / `skip=True` | `#[rivet::test(expect_fail)]` / `#[rivet::test(skip)]` |
+| `@cocotb.test(expect_error=ValueError)` | `#[rivet::test(expect_fail = "part of the message")]`: the failure must say what was expected, so a test cannot pass by failing for an unrelated reason |
+| a test that is meant to run out of time | `#[rivet::test(expect_timeout)]` |
+| `skip=True` decided before the run | `return Err(rivet::skip("reason"))` ends the running test as skipped, so a test can stand down over what the simulator in front of it cannot do |
+| `raise TestSuccess` | `rivet::runtime::finish_test()`, callable from any task, so a monitor can end a test early |
+| pytest fixtures for setup and teardown | `#[rivet::fixture] async fn ready(dut: Module) -> rivet::Result<Signal>`, asked for by argument name: `async fn t(dut: Module, ready: Signal)`. Teardown is the value's `Drop` |
 | `@cocotb.test(stage=1)` | `#[rivet::test(stage = 1)]` |
 | `@cocotb.parametrize(width=[8, 16])` | `#[rivet::test(params = [8, 16])] async fn t(dut: Module, width: u32)` (in-process values) or `[design.param_sets]` in `rivet.toml` (rebuilds the design) |
-| `TESTCASE=name` / `COCOTB_TEST_FILTER` | `rivet run --filter name` (substring) or `cargo test name` |
+| `TESTCASE=name` / `COCOTB_TEST_FILTER` (`re.search`) | `rivet run --filter name` (regular expressions, comma separated, searched against `module::name` and the bare name) or `cargo test name` |
+| `COCOTB_RANDOM_TEST_ORDER=1` | `rivet run --shuffle` (`RIVET_SHUFFLE=1`): shuffles within each stage, and `--seed` replays the same order |
 | `RANDOM_SEED=1234` | `rivet run --seed 1234` (every run prints its seed) |
 | `COCOTB_LOG_LEVEL=DEBUG` | `rivet run --log debug`; `--log-format json`; per-test files in `sim_build/<sim>/logs/` |
-| `results.xml` | the same JUnit format at `sim_build/<sim>/results.xml`, plus `results.json` |
+| `results.xml` | the same JUnit format at `sim_build/<sim>/results.xml`, with `file` and `lineno` on every case, plus `results.json` |
 | `WAVES=1` | `rivet run --waves` (`--waves-per-test` on Verilator) |
 | parallel runs via pytest-xdist and separate `sim_build` dirs | `rivet run -j 4` (shards inside one build) |
+| `pytest` collecting cocotb tests | `cargo nextest run` (one test per process, its own results directory, the design build shared behind a lock; settings in `.config/nextest.toml`) |
+| `cocotb-config --makefiles` and a copied Makefile to start a project | `rivet new <name>` scaffolds a crate that passes as generated |
+| `SIM=ghdl` for VHDL | `rivet run --sim ghdl` (VPI) or `rivet run --sim nvc` (VHPI, which also reaches record members, enumeration literal names and generics) |
 
 ## Handles and values
 
@@ -39,6 +48,8 @@ Rivet and lists the things that have no direct equivalent.
 | `sig.setimmediatevalue(5)` | `sig.set_now(5)` |
 | `sig.value = Force(1)` / `Release()` | `sig.force(1)` / `sig.release()` |
 | `len(sig)` / `sig._range` | `sig.width()` / `sig.info().range` |
+| `sig.value[7:4]` (slice a `LogicArray`) | `sig.slice(7, 4)`, which reads and writes the bit range through the whole vector on every backend |
+| `int(sig.value)` on a VHDL enumeration (its position) | `sig.enum_name()` gives the literal, `sig.enum_literals()` the whole list, where the simulator reports them (NVC through VHPI; `None` elsewhere) |
 | `sig.value` on a `real` | `sig.get_real()` / `sig.set_real(x)` |
 | `str(sig.value)` on a string variable | `sig.get_string()` |
 | `dut._discover_all()` / `dir(dut)` | `dut.children()?`; `rivet bindgen` writes a typed `Dut` struct with a `hierarchy()` method |
@@ -106,7 +117,9 @@ cocotb testbench can adopt Rivet's models before its tests move to Rust
 
 ## Not covered yet
 
-- VHPI, FLI and mixed-language designs (GHDL runs through VPI).
+- FLI and mixed-language designs. VHDL runs on NVC through VHPI and on
+  GHDL through VPI, where records, enumeration literals and generics are
+  not reachable.
 - Commercial simulators; see `docs/design/04-remaining-work.md`.
 - cocotb's `Freeze`/`Deposit` value objects: use `force`/`set`.
 - Python-only conveniences such as `BinaryValue` arithmetic; use Rust integers and `LogicVec`.

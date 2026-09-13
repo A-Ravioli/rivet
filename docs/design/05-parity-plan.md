@@ -137,21 +137,24 @@ row; a CLI test asserting the JUnit attributes; the nextest job.
 reintroduce cocotb's suspend-a-sync-protocol problem, so they are plain
 async functions run inside the same executor.
 
-### 5. Edit-to-result latency
+### 5. Edit-to-result latency (measured; the plan was wrong)
 
 **Gap.** A one-character change to a testbench costs a Rust rebuild and,
 on Verilator, a relink of the model. cocotb reruns immediately. This is the
 complaint that will come back most often, and it is partly fixable.
 
-**Build.**
-- Measure first: a `bench/loop` script recording cold build, warm rebuild
-  after a test-only edit, and after an HDL edit, per simulator, in CI with
-  a threshold.
-- **Hot test libraries.** The test crate already builds as a `cdylib` for
-  VPI. Make the Verilator flow do the same: link the model binary against a
-  loader that `dlopen`s the test library at startup, so a testbench edit
-  relinks only the small library. Keep the linked-in path for release runs
-  behind `--static`.
+**Measured first**, with `ci/loop-latency.py`, and the result changed the
+plan. A test-only edit rebuilds in 0.4 s on Icarus and 0.6 s on Verilator;
+an HDL edit costs 12.5 s on Verilator, all of it Verilator compiling the
+design. The Rust rebuild was never the problem, so the hot-library loader
+below is not worth building: it would shave a fraction of a second off the
+fast case and nothing off the slow one. The numbers are in
+[`../benchmarks.md`](../benchmarks.md) and the script is in CI.
+
+**Not built, and why.**
+- **Hot test libraries** (dlopen the test `cdylib` from the Verilator
+  binary): would save about 0.4 s on an edit that already takes 0.6 s, and
+  nothing on the 12.5 s HDL edit. Not built.
 - Split `rivet-kit` generics that monomorphise per call site; `codegen-units`
   and `debug = 1` defaults in a documented `[profile.dev]` snippet emitted
   by `rivet new`; `-Zshare-generics` where stable.
