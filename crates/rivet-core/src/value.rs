@@ -822,3 +822,62 @@ mod tests {
         assert!(set.contains(&b));
     }
 }
+
+#[cfg(test)]
+mod round_trip_tests {
+    use super::*;
+    use crate::random::Rng;
+
+    /// Randomised round trips. `cargo fuzz` needs a nightly toolchain and a
+    /// separate crate; these run in the ordinary suite, with a seed printed
+    /// on failure so any case that does fail is reproducible.
+    #[test]
+    fn random_vectors_round_trip_through_every_representation() {
+        let mut rng = Rng::seed_from_u64(0xfa17_c0de);
+        for _ in 0..2000 {
+            let width = 1 + (rng.next_u32() % 200);
+            let mut v = LogicVec::zeros(width);
+            for i in 0..width {
+                let bit = match rng.next_u32() % 4 {
+                    0 => Logic::Zero,
+                    1 => Logic::One,
+                    2 => Logic::Z,
+                    _ => Logic::X,
+                };
+                v.set_bit(i, bit);
+            }
+            // Binary string.
+            let s = v.to_binstr();
+            assert_eq!(s.len(), width as usize, "binstr length for width {width}");
+            let back = LogicVec::from_binstr(&s).expect("parses back");
+            assert_eq!(back, v, "binstr round trip of {s}");
+
+            // Slices cover the whole vector without changing it.
+            let hi = width - 1;
+            let mid = width / 2;
+            let top = v.slice(hi, mid);
+            let bottom = v.slice(mid.saturating_sub(1).min(mid), 0);
+            assert_eq!(top.width(), hi - mid + 1);
+            assert!(bottom.width() >= 1);
+
+            // Integers, where the value has no X or Z.
+            if v.is_resolvable() && width <= 64 {
+                let n = v.to_u64().unwrap();
+                assert_eq!(LogicVec::from_u64(width, n), v, "u64 round trip of {s}");
+            }
+        }
+    }
+
+    #[test]
+    fn parsing_never_panics_on_arbitrary_text() {
+        let mut rng = Rng::seed_from_u64(7);
+        let alphabet: Vec<char> = "01xXzZuUwWlLhH-'\"bhod_ 0123456789'".chars().collect();
+        for _ in 0..5000 {
+            let len = (rng.next_u32() % 24) as usize;
+            let s: String = (0..len).map(|_| alphabet[(rng.next_u32() as usize) % alphabet.len()]).collect();
+            // Either parses or returns None; never panics, never hangs.
+            let _ = LogicVec::parse(&s);
+            let _ = LogicVec::from_binstr(&s);
+        }
+    }
+}

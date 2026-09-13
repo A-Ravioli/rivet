@@ -13,6 +13,7 @@ members = [
     "crates/rivet-cli",
     "examples/dff",
     "examples/bench",
+    "examples/bench_soc",
     "examples/fifo",
     "examples/dff_vhdl",
     "examples/vhdl_types",

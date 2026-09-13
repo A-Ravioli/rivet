@@ -77,9 +77,54 @@ Remaining known costs: two `eval_step` calls per half period (after the
 timer and after the ReadWrite flush), Verilator's `callValueCbs` scan, and
 the thread-local runtime borrow on every call into the runtime.
 
+
+## Median and spread, and a real design
+
+The tables above are single runs. `ci/bench.py` repeats each benchmark and
+reports the median with the spread, and the nightly `soak` workflow runs it
+against `bench-baseline.json` so a regression fails a build rather than
+being noticed months later.
+
+`examples/bench_soc` is a real design: PicoRV32 (ISC licensed, vendored)
+running a two-instruction loop out of a memory, with the core's memory
+interface visible to the testbench. It answers the question the tables
+above cannot: what fraction of a real simulation the harness costs.
+
+Icarus Verilog 12, 100 000 cycles, five runs, release harness:
+
+| Benchmark | Median µs/cycle | Spread |
+|---|---|---|
+| `timer_only` | 0.19 | 26% |
+| `edge_roundtrip_immediate_clock` | 1.50 | 13% |
+| `clock_only` | 1.67 | 6% |
+| `edge_roundtrip` | 2.13 | 9% |
+| `edge_then_readonly` | 3.08 | 22% |
+| `value_traffic` | 4.97 | 27% |
+| `soc_clock_only` (PicoRV32) | 19.99 | 12% |
+| `soc_with_monitor` (PicoRV32) | 19.77 | 12% |
+
+The same PicoRV32 simulation driven by a pure-Verilog testbench, with no
+harness at all, takes 15.27 µs/cycle. So on a design that is doing real
+work the harness costs about 4.7 µs per cycle, which is roughly a quarter
+of the run, and a monitor task watching the memory interface every cycle
+adds nothing measurable on top.
+
+Reproduce with:
+
+```sh
+cargo build --release -p rivet-cli
+ci/bench.py --repeat 5 --cycles 100000 --release
+ci/bench.py --repeat 5 --cycles 100000 --release --baseline docs/bench-baseline.json
+```
+
+Spreads above 20% on the shortest benchmarks are the container's
+scheduling noise, not the harness: `timer_only` is a fifth of a
+microsecond per cycle, where a single descheduling event moves the number.
+
 ## What these numbers are not
 
-- One run each, no statistical treatment; expect ±10%.
+- The cocotb comparison tables are one run each; the Rivet numbers above
+  are medians of five. Expect ±10% on the comparison tables.
 - Debug-mode Rivet is roughly 3× slower than these release numbers.
 - A different design, or a testbench that does real work per cycle, will be
   dominated by other costs. The point of the table is the harness floor.

@@ -263,12 +263,19 @@ impl Build {
         // rustc places a crate's own native libraries before the rlibs of
         // its dependencies, so `vpi_*` references from rivet-vpi would not
         // see libverilated.a. Append the archives as a link group instead.
+        // Apple's linker has no --start-group (its linker resolves archives
+        // in any order), so pass the archives plainly there.
+        let mach_o = std::env::var("CARGO_CFG_TARGET_OS").map(|os| os == "macos" || os == "ios").unwrap_or(false);
         println!("cargo:rustc-link-search=native={}", obj_dir.display());
-        println!("cargo:rustc-link-arg=-Wl,--start-group");
+        if !mach_o {
+            println!("cargo:rustc-link-arg=-Wl,--start-group");
+        }
         println!("cargo:rustc-link-arg={}", out_dir.join("librivet_shim.a").display());
         println!("cargo:rustc-link-arg={}", obj_dir.join(format!("lib{prefix}.a")).display());
         println!("cargo:rustc-link-arg={}", obj_dir.join("libverilated.a").display());
-        println!("cargo:rustc-link-arg=-Wl,--end-group");
+        if !mach_o {
+            println!("cargo:rustc-link-arg=-Wl,--end-group");
+        }
         if self.trace_fst {
             println!("cargo:rustc-link-arg=-lz");
         }

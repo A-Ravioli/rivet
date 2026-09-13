@@ -40,6 +40,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-bench-soc"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet",
+ "rivet-verilator",
+]
+
+[[package]]
 name = "example-bus"
 version = "0.1.0"
 dependencies = [

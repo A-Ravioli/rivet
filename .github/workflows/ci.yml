@@ -73,6 +73,25 @@ jobs:
       - name: Kit tests with an embedded interpreter
         run: cargo test -p rivet-kit --features python
 
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install simulators
+        run: brew install icarus-verilog verilator
+      - name: Unit and mock-simulator tests
+        run: cargo test --workspace --no-fail-fast
+      - name: Build CLI
+        run: cargo build -p rivet-cli
+      - name: dff example on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/dff
+      - name: fifo example on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/fifo
+      - name: conformance on Icarus
+        run: target/debug/rivet run --sim icarus -C examples/conformance
+
   msrv:
     name: minimum supported Rust version
     runs-on: ubuntu-24.04

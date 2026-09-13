@@ -1,0 +1,11 @@
+{
+  "bare_soc": 15.273418579999998,
+  "clock_only": 1.67,
+  "edge_roundtrip": 2.13,
+  "edge_roundtrip_immediate_clock": 1.5,
+  "edge_then_readonly": 3.08,
+  "soc_clock_only": 19.99,
+  "soc_with_monitor": 19.77,
+  "timer_only": 0.19,
+  "value_traffic": 4.97
+}

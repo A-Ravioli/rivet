@@ -1,0 +1,73 @@
+name: soak
+
+# A harness is infrastructure: the failure that matters is the one that
+# appears once in fifty runs. This runs the heaviest example repeatedly
+# with a different seed each time and fails on any nondeterminism.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "How many times to run the bus example"
+        default: "40"
+
+permissions:
+  contents: read
+
+jobs:
+  seeds:
+    name: random seeds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install simulators
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator ghdl
+      - name: Build
+        run: cargo build --release -p rivet-cli
+      - name: Run the bus example with a fresh seed each time
+        run: |
+          set -eu
+          runs="${{ github.event.inputs.runs || 40 }}"
+          fail=0
+          for i in $(seq 1 "$runs"); do
+            seed=$RANDOM$RANDOM
+            if ! target/release/rivet run --sim icarus -C examples/bus --seed "$seed" --shuffle --cov-threshold 99 > "run-$i.log" 2>&1; then
+              echo "::error::run $i with seed $seed failed"
+              tail -40 "run-$i.log"
+              fail=1
+            fi
+          done
+          exit $fail
+      - name: Replay one seed twice and compare
+        # The same seed must produce the same stimulus, the same coverage
+        # and the same simulated time, however the run is ordered.
+        run: |
+          set -eu
+          target/release/rivet run --sim icarus -C examples/bus --seed 424242 > a.log 2>&1
+          target/release/rivet run --sim icarus -C examples/bus --seed 424242 > b.log 2>&1
+          grep -E "^\s+example_bus::.*(PASS|FAIL)" a.log | sed 's/[0-9.]*s$//' | sort > a.txt
+          grep -E "^\s+example_bus::.*(PASS|FAIL)" b.log | sed 's/[0-9.]*s$//' | sort > b.txt
+          diff -u a.txt b.txt
+          echo "the same seed replayed exactly"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: soak-logs
+          path: "*.log"
+
+  benchmarks:
+    name: benchmark spread
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install simulators
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
+      - name: Build
+        run: cargo build --release -p rivet-cli
+      - name: Median and spread, against the recorded baseline
+        run: python3 ci/bench.py --repeat 5 --cycles 100000 --release --baseline docs/bench-baseline.json --tolerance 2.0
