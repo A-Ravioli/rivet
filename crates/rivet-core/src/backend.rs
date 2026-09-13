@@ -202,6 +202,16 @@ pub trait Backend {
         None
     }
 
+    /// Tag the events this backend dispatches with `tag`, so a
+    /// [`crate::composite::CompositeBackend`] can tell whose handles and
+    /// callback ids they carry. Only a backend used as a *secondary* leg of
+    /// a composite needs this; the primary keeps tag 0, which is the
+    /// identity. Backends that cannot tag their events refuse, and the
+    /// composite refuses to be built around them.
+    fn set_event_tag(&mut self, _tag: u8) -> Result<()> {
+        Err(BackendError::Unsupported(format!("event tagging on {}", self.name())))
+    }
+
     /// End the simulation.
     fn finish(&mut self);
 

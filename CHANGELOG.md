@@ -19,13 +19,17 @@ listed under "Changed" with the migration in one line.
 - `bindgen` emits multi-dimensional unpacked arrays and nested struct views.
 - Regression parity with cocotb: regular-expression filters, reproducible
   `--shuffle`, `expect_fail = "message"`, `expect_timeout`,
-  `rivet::finish_test()`, and `file`/`line` attributes in `results.xml`.
+  `rivet::runtime::finish_test()`, and `file`/`line` attributes in
+  `results.xml`.
 - `#[rivet::fixture]` for async setup and teardown shared between tests.
 - Launch flows for Questa, Xcelium, VCS, Riviera and DSim, with
   `docs/SIMULATOR-QUIRKS.md` recording the verification status of every
   per-simulator workaround.
 - `--gui` and waveform-viewer launch for the open tools.
 - An optional Python reference-model bridge (`rivet-kit` feature `python`).
+- `CompositeBackend`: one testbench over two procedural interfaces, for
+  mixed-language designs. Routing and tagging are tested against two
+  composed mock backends; no simulator hosting both languages has run it.
 - The user-facing book under `docs/book`, published by CI.
 - Release workflow: crates.io publishing and cross-built binaries.
 

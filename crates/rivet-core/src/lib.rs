@@ -5,6 +5,7 @@
 
 pub mod backend;
 pub mod clock;
+pub mod composite;
 pub mod coverage;
 pub mod error;
 pub mod executor;

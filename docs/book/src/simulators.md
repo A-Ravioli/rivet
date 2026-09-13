@@ -1,10 +1,13 @@
 # Simulators
 
-`rivet run --sim <name>` accepts `icarus`, `verilator` and `ghdl`. Anything
-else is rejected:
+`rivet run --sim <name>` accepts `icarus`, `verilator`, `ghdl` and `nvc`,
+which are the four simulators Rivet is verified on. It also accepts
+`questa`, `xcelium`, `vcs`, `riviera` and `dsim`, which have build and
+launch flows that have never been run; see [Other
+simulators](#other-simulators). Anything else is rejected:
 
 ```text
-rivet: error: unsupported simulator "nvc" (icarus, verilator, ghdl)
+rivet: error: unsupported simulator "cvc" (icarus, verilator, ghdl, nvc; questa, xcelium, vcs, riviera and dsim are implemented but unverified)
 ```
 
 Every simulator reads the same `rivet.toml`. The `[design]` section is shared;
@@ -172,45 +175,93 @@ ghdl -r --workdir=sim_build/ghdl --std=08 <top> --vpi=<lib>.so \
 ```
 
 `--std=08` is added only if `args` contains no `--std` option. GHDL runs
-through VPI, not VHPI. Generics are passed on the command line with `-g`, but
-they are not reachable by name from the testbench on GHDL.
+through VPI, not VHPI. Generics are passed on the command line with `-g`.
+GHDL does not list them among a region's children, so `dut.children()` and
+`rivet bindgen` do not see them, though a direct `dut.signal("WIDTH")`
+lookup does resolve one. GHDL's VPI exposes neither record members nor
+enumeration literal names; see [VHDL](vhdl.md).
 
 **Waveforms.** `--waves` passes `--wave=<top>.ghw`, which covers the whole
 run. The waveform control functions in `rivet::waves` have no effect on GHDL.
 
 ## NVC
 
-NVC is not supported. There is no VHPI backend, and `rivet run --sim nvc`
-fails with `unsupported simulator "nvc"`. NVC exposes VHPI rather than VPI,
-so it cannot use the VPI path that GHDL uses.
+**Prerequisites.** NVC with VHPI. Rivet was developed against 1.23; CI
+builds 1.17.1 from a release tarball, since NVC is not packaged for Ubuntu
+24.04. The design must declare `language = "vhdl"`.
 
-The plan is written up in `docs/design/04-remaining-work.md` §1: a
-`crates/rivet-vhpi` backend, and a runner that would issue
+**Manifest keys.**
 
-```text
-nvc -a --std=08 <sources>
-nvc -e <top>
-nvc -r <top> --load=<lib>.so
+```toml
+[design]
+top = "tb_top"
+language = "vhdl"
+sources = ["hdl/types_pkg.vhd", "hdl/alu.vhd", "hdl/tb_top.vhd"]
+
+[sim.nvc]
+args = ["--std=2008"]     # passed to -a and -e
+run_args = []             # extra arguments to nvc -r
 ```
 
-Nothing of that exists in the code yet. Treat the section above as a plan,
-not a feature.
+`--std=2008` is added only if `args` contains no `--std` option. `trace` and
+`timing` are ignored for NVC.
+
+**The backend feature.** NVC speaks VHPI, not VPI, so the harness goes
+through `crates/rivet-vhpi`. A `cdylib` that carries both backends fails to
+load on NVC, which does not provide the VPI symbols and resolves the library
+eagerly. So a test crate names its backend with a Cargo feature:
+
+```toml
+[dependencies]
+rivet = { workspace = true, default-features = false }
+
+[features]
+default = ["vpi"]
+vpi = ["rivet/vpi"]
+vhpi = ["rivet/vhpi"]
+```
+
+`rivet run --sim nvc` builds the library with
+`--no-default-features --features vhpi`; every other simulator uses the
+crate's default features. `examples/dff_vhdl` and `examples/vhdl_types` are
+both written this way.
+
+**What `rivet run --sim nvc` does.**
+
+```text
+nvc --work=sim_build/nvc/work --std=2008 <args> -a <sources>
+nvc --work=sim_build/nvc/work --std=2008 <args> -e -g<k>=<v>... <top>
+nvc --work=sim_build/nvc/work --std=2008 -r --load <lib>.so \
+        [--wave <run_dir>/<top>.fst] <top> <run_args>
+```
+
+The elaborated design is saved in the work library, where `nvc -r` finds it.
+Generics are elaborated in, so a parameter set is a different build and the
+build hash covers them.
+
+**Waveforms.** `--waves` passes `--wave`, which covers the whole run. VHPI
+has no call to start or stop a dump, so `rivet::waves` has no effect on NVC.
+
+See [VHDL](vhdl.md) for what NVC exposes that GHDL does not, and how
+`examples/vhdl_types` is written to run on both.
 
 ## Behaviour differences
 
 These are the differences the test suites pin down, from `docs/testing.md`.
 
-| Property | Icarus 12 | Verilator 5.020 / 5.036 | GHDL 4.1 |
-|---|---|---|---|
-| Deposit readable back in the same ReadWrite phase | no | yes (applied as an immediate write at the flush) | not tested |
-| `string` variables visible through VPI | no | yes | n/a |
-| Packed struct members addressable by name | no | no | n/a |
-| Four-state values (X before reset) | yes | no (two-state) | yes |
-| Force/release | yes | reported unsupported | not tested |
-| Generics/parameters by name | yes | yes (marked constant from the symbol table) | no |
-| Real and string parameters | yes | yes | n/a |
-| Waveform control from the test | on/off (`$dumpon`/`$dumpoff`), one file per run | on/off and a new file per call | none (`--wave` covers the run) |
-| Internal scopes in the hierarchy | `$ivl_*`, `$unm_blk_*` (skipped by bindgen) | none | n/a |
+| Property | Icarus 12 | Verilator 5.020 / 5.036 | GHDL 4.1 (VPI) | NVC 1.23 (VHPI) |
+|---|---|---|---|---|
+| Deposit readable back in the same ReadWrite phase | no | yes (applied as an immediate write at the flush) | not tested | not tested |
+| `string` variables visible through VPI | no | yes | n/a | n/a |
+| Packed struct or record members addressable by name | no (decoded from the vector) | no (decoded from the vector) | no (tests that need them skip) | yes (`vhpiSelectedNames`) |
+| Enumeration literal names (`enum_literals`, `enum_name`) | no | no | no | yes |
+| Generate elements | pseudo-region `gen[i]` | pseudo-region `gen[i]` | the label resolves to its first element, so elements are found by scanning the enclosing scope | each element is its own region `label(i)`; the backend synthesises the array |
+| Four-state values (X before reset) | yes | no (two-state) | yes | yes |
+| Force/release | yes | reported unsupported | not tested | reported supported, not exercised |
+| Generics/parameters by name | yes | yes (marked constant from the symbol table) | not among the children; a direct lookup resolves | yes (marked constant) |
+| Real and string parameters | yes | yes | n/a | n/a |
+| Waveform control from the test | on/off (`$dumpon`/`$dumpoff`), one file per run | on/off and a new file per call | none (`--wave` covers the run) | none (`--wave` covers the run) |
+| Internal scopes in the hierarchy | `$ivl_*`, `$unm_blk_*` (skipped by bindgen) | none | n/a | n/a |
 
 Two consequences worth planning for:
 
@@ -218,12 +269,29 @@ Two consequences worth planning for:
   `rivet::runtime::caps().four_state` first, as `examples/dff` does in
   `x_propagates_before_reset`. Verilator is two-state.
 - Inertial writes are buffered by the runtime and flushed at ReadWrite on
-  Icarus and Verilator; GHDL is trusted to apply them itself. See
+  Icarus, Verilator and NVC; GHDL is trusted to apply them itself. See
   [The timing model](timing-model.md).
 
 ## Other simulators
 
-Questa, Xcelium, VCS, Riviera, DSim and CVC have quirk handling in
-`rivet-vpi` ported from cocotb, but none of them has ever been run, and there
-is no runner support in the CLI. `examples/conformance` is the suite a
-licence holder should run first.
+`rivet run --sim questa|xcelium|vcs|riviera|dsim` builds the design, loads
+the harness and launches the tool. None of it has ever run. The flags come
+from cocotb's runner and the per-simulator behaviour from cocotb's
+catalogue, and neither has been executed here, so treat these five as code
+rather than as support.
+
+| Simulator | What the CLI runs |
+|---|---|
+| `questa` | `vlog` to compile, then `vsim -pli <lib>.so -voptargs=-access=rw+/. work.<top> -do "run -all; quit -f"` |
+| `xcelium` | `xrun -access +rwc -loadvpisim <lib>.so:vlog_startup_routines_bootstrap -top <top>` |
+| `vcs` | `vcs -full64 -sverilog +acc+3 -debug_access+all -load <lib>.so -o simv`, then `simv` |
+| `riviera` | `alog` to compile, then `vsimsa -do` a script that runs `asim -pli <lib>.so work.<top>` |
+| `dsim` | `dsim -genimage rivet.so -pli_lib <lib>.so -top <top>`, then `dsim -image rivet.so -pli_lib <lib>.so` |
+
+The design-access flags matter most: without them the harness sees no
+handles at all. `--gui` runs Questa, Xcelium and VCS under their own GUI and
+leaves the run under your control instead of quitting at the end.
+
+If you hold a licence, `examples/conformance` is the suite to run first. The
+per-simulator workarounds, which are verified and which are carried from
+cocotb unexecuted, are catalogued in `docs/SIMULATOR-QUIRKS.md`.

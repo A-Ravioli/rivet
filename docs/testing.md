@@ -19,6 +19,7 @@ What is tested, where, and what the suites found.
 | `#[derive(Randomize)]`: ranges, `one_of`, weighted, `with`, `skip`, enum weights and skipped variants, constraints, unsatisfiable constraints, generics; per-test seeds through the runner, stable under filtering, recorded in `results.xml` | `crates/rivet-mock/tests/random.rs` | nothing | 4 |
 | Hang diagnostics: the task dump names every task and its trigger; simulated-time timeouts include it; the wall-clock limit fails a test in-band; the watchdog aborts a stuck process (child process) | `crates/rivet-mock/tests/diagnostics.rs` | nothing | 3 |
 | JSON logs and per-test log files through the runner | `crates/rivet-mock/tests/logging.rs` | nothing | 1 |
+| Mixed-language routing (`CompositeBackend`): handle and callback-id tagging, a lookup crossing the language boundary by fully qualified path, reads, writes and value-change callbacks routed to the owning half while time stays on the primary, and refusal when the halves disagree about precision or a secondary cannot tag its events | `crates/rivet-mock/tests/composite.rs` | nothing (two composed mock backends) | 8 |
 | Clock phase offsets and reproducible jitter; the `Reset` builder (sync and async); waveform commands and per-test wave files | `crates/rivet-mock/tests/clocks_waves.rs` | nothing | 5 |
 | Bus models in loopback (kit master against kit slave with random wait states): AXI4-Lite with monitor and error ranges, AXI4 INCR/WRAP/FIXED bursts, narrow transfers, IDs and errors, AXI4-Stream packets with gaps and backpressure, APB, Avalon-MM simple and pipelined, Wishbone | `crates/rivet-mock/tests/bus.rs` | nothing | 6 |
 | Checkers passing and failing the test (`assert_stable`, `assert_within`, `assert_becomes`, `assert_never`, `assert_always`, `assert_implies`, `assert_no_x`, `find_x`), model scoreboard, golden traces (missing, accepted, matching, differing) | `crates/rivet-mock/tests/kit_checks.rs` | nothing | 5 |
@@ -63,11 +64,14 @@ skips itself when its tool is not installed, so `cargo test` alone proves
 less than the list above.
 
 CI runs all of the above on Ubuntu 24.04 with apt Icarus 12, Verilator
-5.020 and GHDL 4.1, a second job with Verilator 5.036 built from source, a
-third job for the Python integrations, a fourth that builds NVC 1.17.1 and
-runs both VHDL examples on it, a job that lists and runs the dff example
-under `cargo nextest`, and a job pinning the 1.87 MSRV. The NVC numbers in
-this file were taken on 1.23; CI is what says they still hold on 1.17.1.
+5.020 and GHDL 4.1, and in the same job lists and runs the dff example under
+`cargo nextest` and checks that a test-only edit still reaches a result in
+under five seconds (`ci/loop-latency.py`). Separate jobs build Verilator
+5.036 from source, build NVC 1.17.1 from a release tarball and run both VHDL
+examples on it, run the Python integrations and the reference-model bridge,
+build the book and resolve its links, check the package metadata, and pin
+the 1.87 MSRV. The NVC numbers in this file were taken on 1.23; CI is what
+says they still hold on 1.17.1.
 
 ## What the suites found
 
@@ -128,10 +132,11 @@ Test-writing again caught timing-model mistakes (writes in the ReadOnly
 phase after a checker or a `read_only().await`), which is why the immediate
 checkers now return at the start of the next time step.
 
-Bringing up the VHPI backend found five NVC behaviours that had nothing to
-do with Rivet's model, each confirmed with a standalone C plugin before
-being fixed in the backend. They are recorded with the rest of the
-per-simulator behaviour in [`SIMULATOR-QUIRKS.md`](SIMULATOR-QUIRKS.md).
+Bringing up the VHPI backend found five more simulator behaviours, four on
+NVC and one on GHDL, each confirmed with a standalone C plugin against the
+simulator before being fixed in the backend. They are recorded with the rest
+of the per-simulator behaviour in
+[`SIMULATOR-QUIRKS.md`](SIMULATOR-QUIRKS.md).
 
 ## Simulator differences the suite documents
 
@@ -167,8 +172,14 @@ catalogue unverified.
   DSim have launch flows in the CLI and their quirks in the backends, but
   none of it has run; the conformance crate is what a licence holder should
   run first.
-- FLI (Questa's VHDL interface) and mixed-language designs.
-- macOS and Windows.
+- FLI (Questa's VHDL interface). Mixed-language *routing* is covered
+  against two composed mock backends, but no simulator hosting two
+  languages in one process has run it, and `rivet-vpi`/`rivet-vhpi` do
+  not implement `Backend::set_event_tag` yet, so a composite cannot be
+  built from them today.
+- Windows. On macOS, CI runs the unit tests and the dff, fifo and
+  conformance examples on Icarus; Verilator is installed there but not
+  exercised, and no VHDL simulator is.
 - `Signal::slice` is covered against the mock only. It reads and writes
   through the whole vector, so it needs nothing from a backend.
 - The Edalize backend is exercised through FuseSoC only; Edalize's flow

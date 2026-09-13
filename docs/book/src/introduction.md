@@ -43,7 +43,9 @@ cocotb-compatible `results.xml` into `sim_build/<sim>/`.
 | Integer writes | `set_signal_val_int` is 32-bit; wider values become formatted strings | `u64`, `u128` and big integers go straight into the vector encoding |
 | Signal access | attribute lookup (`dut.sig`) | `dut.signal("sig")?`, plus typed bindings from `rivet bindgen` |
 | Build | Makefile or `cocotb_tools.runner` | `rivet.toml` plus a Cargo crate; content-hashed rebuilds |
-| Regression runner | `RegressionManager` | the same loop, plus `cargo test` through `rivet::harness::main()` |
+| Regression runner | `RegressionManager` | the same loop, plus `cargo test` and `cargo nextest` through `rivet::harness::main()` |
+| VHDL | VPI, VHPI or Questa's FLI | GHDL through VPI, NVC through VHPI; no FLI |
+| Reference models | Python, in the testbench language | Rust, or a Python function through `rivet-kit`'s `python` feature |
 | Random stimulus | `random` with `RANDOM_SEED` | `rivet::rng()` per-test streams, `#[derive(Randomize)]` with constraints |
 | Functional coverage | the separate `cocotb-coverage` package | `Covergroup`, `Bins`, `Cross` in the core, merged across runs |
 | Bus models | the separate `cocotb-bus` and `cocotbext-*` packages | `rivet-kit`: AXI4-Lite, AXI4, AXI4-Stream, APB, Avalon-MM, Wishbone |
@@ -101,10 +103,43 @@ logic.
 | `value_traffic` | 1.76 µs |
 | `many_tasks` (100 tasks, per cycle) | 18.9 µs |
 
-What these numbers are not: one run each, no statistical treatment, expect
-±10%. A debug build of Rivet is roughly 3× slower than these release
-numbers. A testbench that does real work per cycle will be dominated by
-other costs. The point of the table is the harness floor.
+The three tables above are one run each, with no statistical treatment;
+expect ±10%.
+
+### Median, spread, and a real design
+
+`ci/bench.py` repeats each benchmark and reports the median with the spread.
+`examples/bench_soc` is a real design: PicoRV32 (ISC licensed, vendored)
+running a two-instruction loop out of a memory, with the core's memory
+interface visible to the testbench. Icarus Verilog 12, 100 000 cycles, five
+runs, release harness:
+
+| Benchmark | Median µs/cycle | Spread |
+|---|---|---|
+| `timer_only` | 0.19 | 26% |
+| `edge_roundtrip_immediate_clock` | 1.50 | 13% |
+| `clock_only` | 1.67 | 6% |
+| `edge_roundtrip` | 2.13 | 9% |
+| `edge_then_readonly` | 3.08 | 22% |
+| `value_traffic` | 4.97 | 27% |
+| `soc_clock_only` (PicoRV32) | 19.99 | 12% |
+| `soc_with_monitor` (PicoRV32) | 19.77 | 12% |
+
+The same PicoRV32 simulation driven by a pure-Verilog testbench, with no
+harness at all, takes 15.27 µs/cycle. So on a design doing real work the
+harness costs about 4.7 µs per cycle, roughly a quarter of the run, and a
+monitor task watching the memory interface every cycle adds nothing
+measurable on top. The spreads above 20% are on the shortest benchmarks,
+where a single descheduling event in the container moves the number.
+
+`docs/bench-baseline.json` records the medians, and `--baseline` fails a
+build that regresses past a tolerance.
+
+A debug build of Rivet is roughly 3× slower than these release numbers, and
+a testbench that does real work per cycle will be dominated by other costs.
+The point of the tables is the harness floor. The number that matters day to
+day is the edit-to-result loop, which is in the
+[Quickstart](quickstart.md).
 
 Reproduce with:
 
@@ -113,26 +148,40 @@ cargo build --release -p rivet-cli
 RIVET_BENCH_N=100000 target/release/rivet run --sim icarus    --release -C examples/bench
 RIVET_BENCH_N=100000 target/release/rivet run --sim verilator --release -C examples/bench
 RIVET_BENCH_N=100000 python3 examples/bench/cocotb/run.py icarus
+ci/bench.py --repeat 5 --cycles 100000 --release
 ```
+
+Full numbers, including what each one measures, are in `docs/benchmarks.md`.
 
 ## Status
 
-Icarus Verilog, Verilator and GHDL work end to end. Verified runs are listed
-in `docs/design/03-status.md`:
+Icarus Verilog, Verilator, GHDL and NVC work end to end. Verified runs are
+listed in `docs/design/03-status.md`:
 
 | Example | Tests | Simulators |
 |---|---|---|
-| `examples/dff` | 10 | Icarus 12.0, Verilator 5.020 and 5.036 |
+| `examples/dff` | 11 | Icarus 12.0, Verilator 5.020 and 5.036 |
 | `examples/fifo` | 3 | Icarus, Verilator |
 | `examples/conformance` | 21 per simulator | Icarus, Verilator 5.020 and 5.036 |
 | `examples/bus` | 13 tests, 25 results over two parameter sets | Icarus, Verilator 5.020 and 5.036 |
-| `examples/dff_vhdl` | 2 | GHDL 4.1 |
+| `examples/dff_vhdl` | 2 | GHDL 4.1, NVC 1.23 |
+| `examples/vhdl_types` | 6: 5 pass and 1 skips on NVC, 2 pass and 4 skip on GHDL | NVC 1.23, GHDL 4.1 |
 | `examples/bench` | 7 | Icarus, Verilator |
+| `examples/bench_soc` | PicoRV32, 2 benchmarks | Icarus |
 
-Commercial simulators (Questa, Xcelium, VCS, Riviera) have quirk handling in
-the VPI backend but have never been run. There is no VHPI backend, so NVC is
-not supported yet; GHDL runs through its VPI. See
-[Simulators](simulators.md).
+`cargo test` and `cargo nextest run` run the same tests, and `rivet new`
+scaffolds a crate whose two tests pass as generated on Icarus and Verilator.
+
+VHDL goes through GHDL's VPI or, since the `rivet-vhpi` backend landed,
+through NVC's VHPI. The two expose different amounts of the design, so
+`examples/vhdl_types` skips what a simulator cannot do rather than failing.
+See [VHDL](vhdl.md).
+
+Questa, Xcelium, VCS, Riviera and DSim have build and launch flows in the
+CLI and their quirks in the backends, and none of it has ever been executed.
+Treat those five as code, not as support; `docs/SIMULATOR-QUIRKS.md` says
+which workaround is verified and which is carried from cocotb's catalogue.
+See [Simulators](simulators.md).
 
 ## Crate layout
 
@@ -140,10 +189,11 @@ not supported yet; GHDL runs through its VPI. See
 |---|---|
 | `rivet-core` | executor, triggers, values, handles, `Backend` trait, runtime, test registry |
 | `rivet-mock` | pure-Rust event simulator for testing the harness itself |
-| `rivet-vpi` | VPI backend (Icarus, Verilator's VPI, and cocotb's catalogued quirks for others) |
+| `rivet-vpi` | VPI backend (Icarus, GHDL, Verilator's VPI, and cocotb's catalogued quirks for others) |
+| `rivet-vhpi` | VHPI backend (NVC; Questa, Riviera and Xcelium VHDL unverified) |
 | `rivet-verilator` | Verilator build helper, C++ shim, simulation main loop |
-| `rivet-macros` | `#[rivet::test]`, `#[derive(Randomize)]` |
-| `rivet-kit` | `Reset`, `Driver`/`Monitor`, bus models, `Memory`, `Scoreboard`, `ModelScoreboard`, checkers, `Trace` |
+| `rivet-macros` | `#[rivet::test]`, `#[rivet::fixture]`, `#[derive(Randomize)]` |
+| `rivet-kit` | `Reset`, `Driver`/`Monitor`, bus models, `Memory`, `Scoreboard`, `ModelScoreboard`, checkers, `Trace`; an optional Python reference model behind the `python` feature |
 | `rivet-manifest` | `rivet.toml` |
 | `rivet-cli` | the `rivet` command |
 | `rivet` | facade crate |

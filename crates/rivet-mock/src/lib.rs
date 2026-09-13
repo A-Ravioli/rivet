@@ -313,6 +313,9 @@ struct Kernel {
     finished: bool,
     pub stats: Stats,
     waves: Vec<WaveCmd>,
+    /// Backend tag applied to dispatched events when this kernel is a
+    /// secondary leg of a `CompositeBackend` (0: not composed).
+    tag: u8,
 }
 
 /// Counters for benchmarking the harness.
@@ -348,6 +351,7 @@ impl Kernel {
             finished: false,
             stats: Stats::default(),
             waves: Vec::new(),
+            tag: 0,
         }
     }
 
@@ -448,6 +452,15 @@ impl MockBackend {
         KERNEL.with(|k| *k.borrow_mut() = Some(Rc::downgrade(&self.k)));
         runtime::init(Box::new(self));
         sim
+    }
+
+    /// A driver for this kernel without installing the runtime, for a
+    /// backend that is one leg of a
+    /// [`CompositeBackend`](rivet_core::composite::CompositeBackend): the
+    /// primary's driver runs the loop, and a secondary is settled with
+    /// [`MockSim::eval`].
+    pub fn driver(&self) -> MockSim {
+        MockSim { k: self.k.clone() }
     }
 }
 
@@ -593,6 +606,10 @@ impl Backend for MockBackend {
         k.nts.retain(|x| *x != id);
         Ok(())
     }
+    fn set_event_tag(&mut self, tag: u8) -> Result<()> {
+        self.k.borrow_mut().tag = tag;
+        Ok(())
+    }
     fn finish(&mut self) {
         self.k.borrow_mut().finished = true;
     }
@@ -651,8 +668,12 @@ impl MockSim {
     }
 
     fn fire(&mut self, ev: Event) {
-        self.k.borrow_mut().stats.callbacks += 1;
-        runtime::dispatch(ev);
+        let tag = {
+            let mut k = self.k.borrow_mut();
+            k.stats.callbacks += 1;
+            k.tag
+        };
+        runtime::dispatch(rivet_core::composite::tag_event(tag, ev));
     }
 
     /// Evaluate the current time step to completion.
@@ -700,6 +721,26 @@ impl MockSim {
         let ro = std::mem::take(&mut self.k.borrow_mut().ro);
         if !ro.is_empty() {
             self.fire(Event::ReadOnly);
+        }
+    }
+
+    /// Apply pending writes and run sensitive processes to a fixpoint
+    /// *without* firing any harness callbacks.
+    ///
+    /// A real mixed-language simulation has one kernel behind both
+    /// interfaces, so the primary's loop evaluates everything. Two composed
+    /// mock backends are two kernels, so a test drives the primary with
+    /// [`MockSim::run`] and settles the secondary with this.
+    pub fn eval(&mut self) {
+        let mut k = self.k.borrow_mut();
+        k.apply_inertial();
+        // Bounded so a combinational loop in a test design cannot hang the
+        // test runner; the mock's own timestep loop is likewise driven by
+        // `delta` returning false.
+        for _ in 0..10_000 {
+            if !k.delta() {
+                break;
+            }
         }
     }
 

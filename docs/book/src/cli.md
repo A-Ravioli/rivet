@@ -1,7 +1,46 @@
 # CLI reference
 
+`rivet -h` prints the usage text, which is the authoritative list:
+
 ```text
 usage: rivet <new|run|build|watch|bindgen|cov|clean> [options] [-- sim args]
+
+options:
+  --sim <name>               icarus (default), verilator, ghdl, nvc;
+                             questa, xcelium, vcs, riviera, dsim (unverified)
+  -p, --package <name>       test crate (default: crate in the current directory)
+  -C <dir>                   change to directory first
+  --release                  build the harness in release mode
+  --filter <a,b>             run only tests matching one of these regular expressions
+  -j, --jobs <n>             run tests in n simulator processes (tests must be independent)
+  --param-set <name>         run only this [design.param_sets] entry (default: all)
+  --waves                    dump waveforms
+  --waves-per-test           one waveform file per test (Verilator)
+  --seed <n>                 random seed (RIVET_SEED); printed by every run for replay
+  --wall-timeout <secs>      per-test wall-clock limit (RIVET_WALL_TIMEOUT)
+  --log <level>              RIVET_LOG level (error|warn|info|debug|trace)
+  --log-format <text|json>   log record format
+  --log-dir <dir>            per-test log files (default sim_build/<sim>/logs)
+  --no-log-dir               no per-test log files
+  --cov-threshold <pct>      fail the run below this functional coverage
+  --update-golden            rewrite golden trace files from this run
+  --shuffle                  shuffle test order within each stage (reproducible from --seed)
+  --gui                      run the simulator's own GUI (Questa, Xcelium, VCS)
+  --wave-open                open the waveform in a viewer when the run finishes
+  --manifest <rivet.toml>    design description (default: next to or above the crate)
+  --path <dir>               new: depend on a Rivet checkout instead of crates.io
+  -o <file>                  bindgen: output file (default src/dut.rs)
+  -v                         verbose
+
+commands:
+  new <name>   scaffold a testbench crate that runs as generated
+  run          build everything and run the tests
+  build        build without running
+  watch        run, then rerun whenever a source file changes
+  bindgen      run the design once to dump its hierarchy, then write typed bindings
+  cov report   merge coverage.json files (default: this crate's) and report
+               [--threshold <pct>] [files...]
+  clean        remove sim_build
 ```
 
 Everything after a bare `--` is passed to the simulator command unchanged.
@@ -27,8 +66,8 @@ the name become underscores, and a leading digit gets an underscore prefix,
 so `my-tb` becomes the crate `my_tb`.
 
 It writes `Cargo.toml`, `rivet.toml`, `build.rs`, `hdl/counter.sv`,
-`src/lib.rs` with two tests, `src/main.rs`, `tests/sim.rs`, `.gitignore` and
-`README.md`, then prints:
+`src/lib.rs` with two tests, `src/main.rs`, `tests/sim.rs`, `.gitignore`,
+`.cargo/config.toml` and `README.md`, then prints:
 
 ```text
 rivet: created /tmp/counter-tb
@@ -50,7 +89,13 @@ asks the harness for its test list, splits it round-robin into shards, and
 runs one simulator process per shard.
 
 Output artefacts land in `sim_build/<sim>/`, and under
-`sim_build/<sim>/<param_set>/` and `.../shard<i>/` when those apply.
+`sim_build/<sim>/<param_set>/`, `.../shard<i>/` and
+`.../one/<module>__<test>/` when those apply.
+
+`--sim nvc` is the one simulator that changes how the crate is built: the
+harness goes through VHPI there, so the library is built with
+`--no-default-features --features vhpi`. Every other simulator uses the
+crate's default features. See [VHDL](vhdl.md).
 
 ### `rivet build`
 
@@ -89,11 +134,11 @@ Removes the `sim_build` directory in the current directory, or in the directory 
 
 | Option | Argument | Default | Meaning |
 |---|---|---|---|
-| `--sim` | `icarus`, `verilator`, `ghdl` | `RIVET_SIM`, else `icarus` | simulator |
+| `--sim` | `icarus`, `verilator`, `ghdl`, `nvc`; `questa`, `xcelium`, `vcs`, `riviera`, `dsim` | `RIVET_SIM`, else `icarus` | simulator; the last five have never been run |
 | `-p`, `--package` | crate name | the crate in the current directory | which workspace member to build |
 | `-C` | directory | the current directory | change to this directory first |
 | `--release` | none | off | build the harness in release mode |
-| `--filter`, `-k` | `a,b` | none | run only tests whose name or `module::name` contains one of these |
+| `--filter`, `-k` | `a,b` | none | run only tests matching one of these regular expressions, with a literal fallback |
 | `-j`, `--jobs` | `n` | 1 | run the tests in `n` simulator processes; `-j4` also works |
 | `--param-set` | name | every set in the manifest | run only this `[design.param_sets]` entry |
 | `--waves` | none | off | dump waveforms |
@@ -106,6 +151,9 @@ Removes the `sim_build` directory in the current directory, or in the directory 
 | `--no-log-dir` | none | off | write no per-test log files |
 | `--cov-threshold`, `--threshold` | percentage | none | fail the run below this functional coverage |
 | `--update-golden` | none | off | rewrite golden trace files from this run |
+| `--shuffle` | none | off | shuffle the test order within each stage, reproducibly from the seed |
+| `--gui` | none | off | run the simulator's own GUI (Questa, Xcelium, VCS); implies `--waves` |
+| `--wave-open` | none | off | open the dump the run produced in a viewer; implies `--waves` |
 | `--manifest` | path | `rivet.toml` next to or above the crate | design description |
 | `--path` | directory | none | `new`: depend on a Rivet checkout instead of crates.io |
 | `-o`, `--out` | file | `src/dut.rs` | `bindgen` output; also the merged file for `cov report` |
@@ -113,8 +161,35 @@ Removes the `sim_build` directory in the current directory, or in the directory 
 | `-h`, `--help` | none | | print usage and exit 2 |
 | `--` | | | pass the rest to the simulator |
 
+`-k`, `--threshold`, `--out`, `--verbose` and `--help` are accepted but not
+printed in the usage text above.
+
 An unknown option, a missing numeric argument, or no command at all prints
 the usage text and exits 2.
+
+### `--filter`
+
+Patterns are comma-separated. Each is a regular expression searched against
+`module::name` and against the bare test name, as cocotb's
+`COCOTB_TEST_FILTER` is, and a pattern that is not valid regular expression
+syntax, or that matches nothing as one, falls back to a substring match. So
+`axi_mem_bursts[16]` selects that one parametrised test rather than being
+read as a character class.
+
+### `--shuffle`
+
+Shuffles within each stage only, seeded from the run's base seed. Stages
+still run in order, and the run replays exactly with the `--seed` it
+printed.
+
+### `--gui` and `--wave-open`
+
+`--gui` runs Questa, Xcelium or VCS under its own GUI and leaves the run
+under your control instead of quitting at the end. The open simulators have
+no GUI of their own, so `--wave-open` is the equivalent: when the run
+finishes it opens the dump in `surfer`, or in `gtkwave` if surfer is not
+installed, and prints where the dump is when neither is. Both imply
+`--waves`.
 
 ## Exit codes
 
@@ -134,9 +209,12 @@ finds no `results.json` for it and reports that as a setup failure, so the
 rivet run --sim icarus    -C examples/dff
 rivet run --sim verilator -C examples/dff
 rivet run --sim ghdl      -C examples/dff_vhdl
+rivet run --sim nvc       -C examples/vhdl_types
 rivet run --sim icarus -C examples/dff --filter counter --waves --log debug
+rivet run --sim icarus -C examples/dff --filter 'counter|fifo' --shuffle
 rivet run --sim icarus -C examples/bus -j 4 --cov-threshold 95 --seed 42
 rivet run --sim icarus -C examples/bus --param-set init5 --update-golden
+rivet run --sim verilator -C examples/dff --wave-open
 rivet build --sim verilator -C examples/bus
 rivet watch --sim verilator -C examples/bus
 rivet bindgen --sim icarus -C examples/dff          # writes src/dut.rs
@@ -158,7 +236,9 @@ With the `harness` feature and a `harness = false` test target,
 | `--list` | list tests without a simulator |
 | `--test-threads <n>` | simulator processes, the same as `-j` |
 | `--format json` | libtest JSON output |
-| `--nocapture`, `--ignored`, `--include-ignored`, `--show-output`, `-q` | accepted and ignored |
+| `--format terse` | with `--list`, only `name: test` lines, which is what `cargo nextest` parses |
+| `--ignored` | lists nothing: Rivet has no ignored tests, and `skip` is decided at run time |
+| `--nocapture`, `--include-ignored`, `--show-output`, `-q` | accepted and ignored |
 
 ```sh
 cargo test -p example-dff -- --list
@@ -166,6 +246,21 @@ cargo test -p example-dff
 RIVET_SIM=verilator cargo test -p example-dff -- counter
 cargo test -p example-bus -- --test-threads 2
 ```
+
+## `cargo nextest`
+
+`cargo nextest` needs nothing added to the crate. It lists through
+`--list --format terse` and then runs one test per simulator process:
+
+```sh
+cargo nextest list -p example-dff
+cargo nextest run -p example-dff
+cargo nextest run -p example-dff --profile ci
+```
+
+Each process writes to its own `sim_build/<sim>/one/<module>__<test>/`, and
+a lock file serialises the shared design build. `.config/nextest.toml` caps
+simulator processes at four and gives them a 60 second slow timeout.
 
 ## Environment variables
 
@@ -177,7 +272,8 @@ embedding harness can set directly:
 | `RIVET_SIM` | the user | default simulator for `rivet` and `cargo test` |
 | `RIVET_MANIFEST` | `--manifest` | path to `rivet.toml`; also read by the Verilator `build.rs` |
 | `RIVET_SEED` | `--seed` | base seed for the run |
-| `RIVET_TEST_FILTER` | `--filter` | comma-separated substrings selecting tests |
+| `RIVET_TEST_FILTER` | `--filter` | comma-separated regular expressions selecting tests, with a literal fallback |
+| `RIVET_SHUFFLE` | `--shuffle` | `1`, `true` or `yes` shuffles the test order within each stage |
 | `RIVET_TEST_SELECT` | `-j N` | exact `module::name` list for one shard |
 | `RIVET_PARAM_SET` | `--param-set`, and per set | the manifest parameter set this process runs; readable as `rivet::test::param_set()` |
 | `RIVET_WALL_TIMEOUT` | `--wall-timeout` | per-test wall-clock limit in seconds |
@@ -199,6 +295,7 @@ embedding harness can set directly:
 | `RIVET_WATCH_ONCE` | the user | `rivet watch` runs once and returns, for tests |
 | `RIVET_TRUST_INERTIAL_WRITES` | the user | `1` makes the VPI backend trust inertial writes; ignored on Verilator |
 | `RIVET_VERILATOR_DIRECT` | the user | `0` forces the VPI value path instead of direct model access |
+| `RIVET_VHPI_TOOL` | the user | tool name for the VHPI backend, which NVC does not report |
 | `VERILATOR` | the user | the `verilator` binary the build helper runs |
 | `RIVET_BENCH_N` | the user | cycle count for `examples/bench` |
 | `RIVET_BIN` | the user | the `rivet` binary the Edalize backend runs |

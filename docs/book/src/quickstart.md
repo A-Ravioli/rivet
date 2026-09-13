@@ -62,6 +62,7 @@ counter-tb/
 ├── src/lib.rs          two tests
 ├── src/main.rs         the Verilator entry point
 ├── tests/sim.rs        the `cargo test` entry point
+├── .cargo/config.toml  the macOS link flags a VPI plugin needs
 ├── .gitignore
 └── README.md
 ```
@@ -73,14 +74,32 @@ counter-tb/
 top = "counter"
 sources = ["hdl/counter.sv"]
 
-[design.parameters]
-WIDTH = 8
+[design.params]
+WIDTH = "8"
 
 [sim.icarus]
 args = ["-g2012"]
 
 [sim.verilator]
 trace = true
+```
+
+`[design.params]` values are strings, whatever the HDL type. They are passed
+to the HDL compiler, so changing one rebuilds the design.
+
+### `Cargo.toml`
+
+The generated manifest names its backend with a Cargo feature, because one
+library cannot carry two of them:
+
+```toml
+[features]
+default = ["vpi"]
+# One backend per simulator: VPI for Icarus and GHDL, VHPI for NVC. A
+# library carrying both fails to load on NVC, which resolves eagerly.
+vpi = ["rivet/vpi"]
+vhpi = ["rivet/vhpi"]
+verilator = ["rivet/verilator"]
 ```
 
 ### `src/lib.rs`
@@ -130,8 +149,9 @@ through the load port using `rivet::rng()`.
 ### `build.rs`, `src/main.rs`, `tests/sim.rs`
 
 ```rust
-// build.rs: only the Verilator flow compiles the design into this crate.
+// build.rs
 fn main() {
+    // Only the Verilator flow compiles the design into this crate.
     if std::env::var_os("CARGO_FEATURE_VERILATOR").is_some() {
         rivet_verilator::Build::from_manifest().build();
     }
@@ -139,7 +159,9 @@ fn main() {
 ```
 
 ```rust
-// src/main.rs: Verilator entry point; build.rs links the compiled model in.
+//! src/main.rs: Verilator entry point; `build.rs` links the compiled model in.
+
+// Link the test library so its `#[rivet::test]` registrations are present.
 use counter_tb as _;
 
 fn main() {
@@ -148,7 +170,7 @@ fn main() {
 ```
 
 ```rust
-// tests/sim.rs: the `cargo test` entry point.
+//! tests/sim.rs: `cargo test` entry point; see `rivet::harness`.
 use counter_tb as _;
 
 fn main() -> std::process::ExitCode {
@@ -210,12 +232,15 @@ sim_build/icarus/
 ## 6. Next steps
 
 ```sh
-rivet run --sim icarus --filter load       # only tests whose name contains "load"
+rivet run --sim icarus --filter load       # tests matching this regular expression
 rivet run --sim icarus --waves             # sim_build/icarus/counter.fst
+rivet run --sim icarus --waves --wave-open # and open it in surfer or gtkwave
 rivet run --sim icarus --seed 42           # replay a specific seed
+rivet run --sim icarus --shuffle           # shuffle the order, replayable from the seed
 rivet run --sim icarus --log debug         # more log detail
 rivet watch --sim icarus                   # rerun on every source change
 cargo test                                 # the same tests through the cargo harness
+cargo nextest run                          # one simulator process per test
 ```
 
 `cargo test` uses the `RIVET_SIM` environment variable to choose the
@@ -229,4 +254,32 @@ rivet run --sim verilator
 ```
 
 which uses `build.rs` to compile the design into a native binary. See
-[Simulators](simulators.md) for the prerequisites of each simulator.
+[Simulators](simulators.md) for the prerequisites of each simulator, and
+[VHDL](vhdl.md) for GHDL and NVC.
+
+## 7. How long the loop takes
+
+The number that matters day to day is not the simulation rate but the time
+from saving a file to seeing a result. Measured by `ci/loop-latency.py` on
+`examples/dff` with one test selected, so it is the loop and not the suite:
+
+| Edit | Icarus | Verilator |
+|---|---|---|
+| nothing changed | 0.1 s | 0.1 s |
+| one line in the test crate | 0.4 s | 0.6 s |
+| one line in the HDL | 0.4 s | 12.5 s |
+| everything, from clean | 0.8 s | 13.0 s |
+
+The Rust rebuild is not the cost it looks like: a test-only edit is under a
+second on both, because Cargo rebuilds one small crate and relinks. The
+twelve seconds is Verilator compiling the design again after an HDL edit,
+which is Verilator's own work. Python has no compile step, so cocotb's
+test-edit loop is shorter than 0.4 s; that gap is a fraction of a second.
+
+`rivet watch --sim icarus` keeps the loop to these numbers without retyping
+the command. Reproduce with:
+
+```sh
+ci/loop-latency.py --sim icarus --example dff --filter counter
+ci/loop-latency.py --sim verilator --example dff --filter counter
+```

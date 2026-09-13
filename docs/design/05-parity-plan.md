@@ -220,6 +220,24 @@ process, so this lands behind §7's Questa licence. Build it small until then.
 
 **Cost.** 300 lines once VHPI exists.
 
+**Built** (`crates/rivet-core/src/composite.rs`, 8 tests in
+`crates/rivet-mock/tests/composite.rs`). `CompositeBackend::new(primary,
+secondaries)` tags handles in the top four bits and callback ids in the top
+eight, routes hierarchy, values and value-change callbacks to the owning
+backend, keeps time and every timing callback on the primary, and resolves a
+name the owning backend does not have by walking the other backend's
+hierarchy from its own root by fully qualified path. It refuses to be built
+when the halves disagree about time precision — they are meant to be two
+views of one kernel — and when a secondary cannot tag the events it
+dispatches, since the runtime would otherwise attribute them to the primary.
+That last check is the honest state of the integration: tagging is a new
+`Backend::set_event_tag`, and only `rivet-mock` implements it. `rivet-vpi`
+and `rivet-vhpi` need the same two lines in their dispatch paths, and then a
+simulator that hosts both languages in one process to find out what else is
+wrong. Two composed mock backends are two kernels, not one, so the
+end-to-end test settles the secondary explicitly (`MockSim::eval`); a real
+mixed-language simulator settles both halves itself.
+
 ### 9. Python where Python is better
 
 **Gap.** cocotb testbenches reach numpy, scipy, pyuvm, cocotb-coverage and
