@@ -1,242 +1,211 @@
-# Rivet
+# rivet ⚙️
 
-Cocotb-style hardware verification in Rust: `async` testbenches that drive a
-real simulator, without the embedded Python interpreter.
+[![CI](https://github.com/A-Ravioli/rivet/actions/workflows/ci.yml/badge.svg)](https://github.com/A-Ravioli/rivet/blob/main/.github/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+[![Rust](https://img.shields.io/badge/rust-1.87%2B-orange)](https://rustup.rs)
+[![Simulators](https://img.shields.io/badge/simulators-Icarus%20%7C%20Verilator%20%7C%20GHDL%20%7C%20NVC-informational)](#simulators)
 
-Rivet keeps cocotb's timing model and vocabulary — `RisingEdge`, `ReadWrite`,
-`ReadOnly`, `Timer`, `Deposit`/`Force`/`Release`, `start_soon` — and replaces
-the Python runtime and its string-typed values with an in-process native
-executor and `aval`/`bval` vectors. A test is a normal Rust `async fn`, so
-the compiler checks it, `cargo test` runs it, and a misspelled signal can be
-a build error rather than a runtime one.
+**[Read the book](docs/book/src/introduction.md)** | **[Migrating from cocotb](docs/migration.md)** | **[Benchmarks](docs/benchmarks.md)**
 
-| Per simulated clock cycle, Icarus Verilog 12 | cocotb 2.1 | Rivet |
+Rivet drives HDL simulators from Rust `async` testbenches. It keeps everything
+cocotb got right — the timing model, `RisingEdge`, `ReadWrite`, `ReadOnly`,
+`Timer`, `Deposit`/`Force`/`Release` — and throws out the embedded Python
+interpreter that makes every one of those cost microseconds.
+
+Your testbench is a regular Rust crate. Signals are typed, not strings. A
+misspelled port is a compile error. `cargo test` runs it. And awaiting a clock
+edge costs 2.5 µs instead of 26.6 µs.
+
+Rivet runs on Icarus Verilog, Verilator, GHDL and NVC — Verilog and VHDL, VPI
+and VHPI — all four verified in CI on every commit, and Icarus on macOS too.
+
+> One of the two tests `rivet new` generates for you, unedited:
+>
+> ```rust
+> use rivet::prelude::*;
+>
+> #[rivet::test(timeout = 100.us())]
+> async fn counts_when_enabled(dut: Module) -> rivet::Result<()> {
+>     let clk = dut.signal("clk")?;
+>     let _clock = Clock::start(clk, 10.ns());
+>     reset(&dut, clk).await?;
+>
+>     let count = dut.signal("count")?;
+>     dut.signal("en")?.set(1);
+>     for i in 1..=20u64 {
+>         clk.rising_edge().await;
+>         // The edge returns before the flop updates; read after it settles.
+>         read_only().await;
+>         assert_eq!(count.get_u64()?, i, "cycle {i}");
+>         next_time_step().await;
+>     }
+>     Ok(())
+> }
+> ```
+>
+> (`reset` is a helper a few lines up in the same generated file.)
+
+## Motivation
+
+Verifying hardware means choosing between three unhappy options:
+
+- **Write it in SystemVerilog.** Full access to the simulator, in a language
+  with no package manager and no test runner, where randomisation and coverage
+  work only on the simulators you pay for.
+- **Write a Verilator C++ harness.** Fast, and now you hand-manage `eval()`
+  calls, raw pointers into the model, and a rebuild every time the RTL moves.
+  There is no timing model; you invent one.
+- **Use cocotb.** The nicest of the three by a distance — a real scheduler,
+  real triggers, a real language. But every trigger crosses into CPython, every
+  value becomes a string on the way in and out, and `dut.conut` is a runtime
+  `AttributeError` at 3 a.m. rather than a compile error.
+
+cocotb's design is right and Rivet keeps it. What Rivet replaces is the
+interpreter underneath it. The testbench is compiled, so the simulator talks to
+native code across the same PLI it was already using, values move as
+`aval`/`bval` word pairs instead of decimal strings, and the names of your
+ports are checked before the simulation starts.
+
+The cost is a compile step cocotb does not have. Measured rather than guessed,
+it is **0.4 s on Icarus and 0.6 s on Verilator** for a one-line test edit, which
+is the honest version of the tradeoff — and the reason Rivet does not bother
+hot-loading the test library to shave it.
+
+## Speed
+
+Per simulated clock cycle, Icarus Verilog 12, 100k cycles:
+
+| What the testbench does | cocotb 2.1 | Rivet |
 |---|---|---|
-| await an edge each cycle | 26.6 µs | **2.50 µs** |
+| await an edge every cycle | 26.6 µs | **2.50 µs** |
 | edge, write 32-bit, read 32-bit and 512-bit | 305 µs | **7.68 µs** |
 | 100 tasks awaiting every edge | 311 µs | **20.8 µs** |
 
-On a real design — PicoRV32 running a program for 100k cycles — the whole
-harness costs about 4.7 µs per cycle, roughly a quarter of the run, and a
-monitor task watching the memory interface adds nothing measurable. Full
-tables, method, and what the numbers are *not*, in
-[`docs/benchmarks.md`](docs/benchmarks.md).
+Micro-benchmarks flatter everyone, so there is also a real one: PicoRV32
+running a program for 100k cycles costs 15.27 µs/cycle with no harness at all
+and 19.99 µs/cycle driven by Rivet. The harness is about a quarter of the run,
+and a monitor task watching the memory bus every cycle adds nothing measurable.
+Method, medians, spread and caveats in [`docs/benchmarks.md`](docs/benchmarks.md).
 
-## Quick start
+## Features
 
-```sh
-cargo build -p rivet-cli                        # 0.1.0 is unreleased; build from source
-target/debug/rivet new counter --path "$PWD"    # a crate whose two tests pass as generated
-target/debug/rivet run --sim icarus -C counter
-```
+- Works on four simulators, two HDLs, two PLIs — Icarus, Verilator, GHDL, NVC
+- Seeded random stimulus and `#[derive(Randomize)]` with constraints; every run
+  prints its seed and `--seed` replays it exactly
+- Functional coverage — covergroups, bins, crosses — merged across parallel runs
+- A kit: AXI4, AXI4-Lite, AXI4-Stream, APB, Avalon-MM, Wishbone, a sparse
+  memory with `$readmemh`, scoreboards, checkers, golden traces
+- `rivet bindgen` turns your hierarchy — `typedef enum`, `typedef struct packed`
+  and all — into Rust types, so port names and widths are checked by rustc
+- Hangs name themselves: a timeout prints every live task and what it awaits
+- `rivet run -j 8` shards a regression across simulator processes
+- `cargo test` and `cargo nextest` work, and so does cocotb-compatible
+  `results.xml`
+- It is an ordinary Rust crate: your editor, your debugger, `cargo add`
+  anything you want in a testbench
 
-`rivet run` builds the test crate, compiles the design described in
-`rivet.toml`, loads the harness into the simulator, and reads back a
-cocotb-compatible `results.xml` from `sim_build/<sim>/`. `--path` points the
-generated crate at this checkout, which is how to use Rivet today: version
-0.1.0 has not been published to crates.io yet.
-
-## A test
-
-Two of the tests `rivet new` writes, unedited:
-
-```rust
-use rivet::prelude::*;
-
-#[rivet::test(timeout = 100.us())]
-async fn counts_when_enabled(dut: Module) -> rivet::Result<()> {
-    let clk = dut.signal("clk")?;
-    let _clock = Clock::start(clk, 10.ns());
-    reset(&dut, clk).await?;
-
-    let count = dut.signal("count")?;
-    dut.signal("en")?.set(1);
-    for i in 1..=20u64 {
-        clk.rising_edge().await;
-        // The edge returns before the flop updates; read after it settles.
-        read_only().await;
-        assert_eq!(count.get_u64()?, i, "cycle {i}");
-        next_time_step().await;
-    }
-    Ok(())
-}
-
-#[rivet::test(timeout = 100.us())]
-async fn load_overrides_count(dut: Module) -> rivet::Result<()> {
-    let clk = dut.signal("clk")?;
-    let _clock = Clock::start(clk, 10.ns());
-    reset(&dut, clk).await?;
-
-    // A fresh random value every run; `rivet run --seed N` replays it.
-    let want = rivet::rng().gen_range(0..=255u64);
-    dut.signal("d")?.set(want);
-    dut.signal("load")?.set(1);
-    clk.rising_edge().await;
-    read_only().await;
-    assert_eq!(dut.signal("count")?.get_u64()?, want, "loaded value");
-    Ok(())
-}
-```
-
-An edge returns *before* the HDL reacts to it, exactly as in cocotb, so
-`read_only().await` is how a test sees the settled value; writes there are
-refused rather than silently lost. [`examples/dff`](examples/dff) is a
-complete crate — `Cargo.toml`, `build.rs`, `rivet.toml`, and the `cdylib`
-entry point the simulator loads.
-
-## Simulator support
+## Simulators
 
 | Simulator | Interface | Status |
 |---|---|---|
-| Icarus Verilog 12 | VPI | verified in CI |
-| Verilator 5.020 and 5.036 | direct access, VPI for value changes | verified in CI |
+| Icarus Verilog 12 | VPI | verified in CI, Linux and macOS |
+| Verilator 5.020 / 5.036 | direct model access | verified in CI |
 | GHDL 4.1 | VPI | verified in CI |
-| NVC 1.17 (developed against 1.23) | VHPI | verified in CI |
-| Questa, Xcelium, VCS, Riviera, DSim | VPI / VHPI | launch flows and quirks written, **never run** |
+| NVC 1.17 | VHPI | verified in CI |
+| Questa, Xcelium, VCS, Riviera, DSim | VPI / VHPI | code written, **never run** |
 
-The unverified column is the honest one: the code carries cocotb's
-catalogued workaround for each of those tools, but nobody has run it. A
-licence holder should start with [`examples/conformance`](examples/conformance).
-Per-simulator behaviour, each marked verified or not, is in
-[`docs/SIMULATOR-QUIRKS.md`](docs/SIMULATOR-QUIRKS.md). Mixed-language
-designs have a routing backend that is tested only against two mock
-backends, never a simulator hosting both languages.
-
-## What you get
-
-**Stimulus and coverage.** `rivet::rng()` gives every test its own stream
-derived from the run seed and the test name; `#[derive(Randomize)]` covers
-ranges, weights, enum variants and rejection-sampled constraints. Every run
-prints its seed, each test's seed lands in `results.xml`, and `--seed`
-replays it. Functional coverage (`Covergroup`, `Bins`, crosses) merges across
-shards and parameter sets, with `rivet cov report --threshold 90`.
-
-**The kit.** AXI4-Lite, AXI4, AXI4-Stream, APB, Avalon-MM and Wishbone
-masters, plus memory-backed slaves with configurable backpressure; a sparse
-`Memory` with `$readmemh` loading; reference models feeding a `Scoreboard` —
-including a Python model, so an existing numpy model can score a Rivet test;
-checkers (`assert_never`, `assert_implies`, `assert_no_x`, …); and golden
-transaction traces through `assert_trace!`.
-
-**Regressions.** `rivet run -j 8` shards tests across simulator processes and
-merges the results and coverage; `[design.param_sets]` rebuilds the design
-per parameterisation; `#[rivet::test(params = [8, 16])]` expands one test per
-value. Filters are regular expressions, `--shuffle` is reproducible from the
-run seed, and `expect_fail = "message"`, `expect_timeout`, `rivet::skip` and
-`rivet::runtime::finish_test()` cover the ways a test ends.
-
-**When it goes wrong.** A timeout prints every live task and what it is
-waiting on, so a hang names itself instead of just stopping. Per-test
-wall-clock limits fail in-band, and a watchdog aborts a process whose
-simulator never returns control. Logs are per-test files or JSON;
-waveforms can be per-test, or a window opened around the interesting part.
-
-**Tooling.** `rivet bindgen` turns the hierarchy — and any `typedef enum` or
-`typedef struct packed` — into Rust types; `rivet watch` reruns on change;
-`rivet new` scaffolds a crate; `#[rivet::fixture]` provides async setup a
-test asks for by argument name, torn down when the value drops.
-
-**Interop.** `fusesoc run --tool rivet` through the Edalize backend in
-[`integrations/edalize`](integrations/edalize), and
-[`python/rivet_py`](python/rivet_py), which brings the memory model, RNG,
-scoreboard and coverage to testbenches still running on cocotb.
-
-## Running tests
-
-```sh
-target/debug/rivet run --sim icarus    -C examples/dff
-target/debug/rivet run --sim verilator -C examples/dff
-target/debug/rivet run --sim ghdl      -C examples/dff_vhdl
-target/debug/rivet run --sim nvc       -C examples/vhdl_types
-target/debug/rivet run --sim icarus -C examples/dff --filter counter --waves --log debug
-target/debug/rivet run --sim icarus -C examples/bus -j 4 --cov-threshold 95 --seed 42
-target/debug/rivet watch --sim verilator -C examples/bus
-target/debug/rivet cov report -C examples/bus --threshold 100
-```
-
-With the `harness` feature and a `harness = false` test target (see
-[`examples/dff/tests/sim.rs`](examples/dff/tests/sim.rs)), plain `cargo test`
-and `cargo nextest` work too — nextest gives each test its own process:
-
-```sh
-cargo test -p example-dff -- --list        # no simulator needed
-cargo test -p example-dff                  # runs on Icarus
-RIVET_SIM=verilator cargo test -p example-dff -- counter
-cargo nextest run -p example-dff
-```
-
-## Typed bindings
-
-```sh
-target/debug/rivet bindgen --sim icarus -C examples/dff   # writes src/dut.rs
-```
-
-This generates a struct per module with a field per signal, so a misspelled
-signal is a compile error and a width change is caught when the test binds.
-`typedef enum` and `typedef struct packed` declarations become Rust enums and
-structs with `from_signal` and `set_on`:
-
-```rust
-mod dut;
-use dut::Dut;
-
-#[rivet::test]
-async fn typed(dut: Dut) -> rivet::Result<()> {
-    let _clock = Clock::start(dut.clk, 10.ns());
-    dut.d.set(0x5a);
-    dut.clk.rising_edge().await;
-    read_only().await;
-    assert_eq!(dut.q.get_u64()?, 0x5a);
-    Ok(())
-}
-```
-
-## Documentation
-
-| | |
-|---|---|
-| [The book](docs/book) | quickstart, timing model, writing tests, the kit, debugging, CLI reference |
-| [Migrating from cocotb](docs/migration.md) | equivalence tables, trigger by trigger |
-| [Benchmarks](docs/benchmarks.md) | method, medians and spread, a real design, edit-to-result latency |
-| [Simulator quirks](docs/SIMULATOR-QUIRKS.md) | every per-simulator behaviour, and whether it was observed or inherited from cocotb |
-| [Testing](docs/testing.md) | what is tested where, what is not, and the defects the suites found |
-| [Design](docs/design/README.md) | the cocotb analysis this was built from, the architecture, and the status of each milestone |
-
-## Repository layout
-
-| Crate | Role |
-|---|---|
-| `rivet` | facade: what a testbench imports |
-| `rivet-core` | executor, triggers, values, handles, `Backend` trait, runtime, test registry |
-| `rivet-macros` | `#[rivet::test]`, `#[rivet::fixture]`, `#[derive(Randomize)]` |
-| `rivet-kit` | `Reset`, `Driver`/`Monitor`, bus models, `Memory`, scoreboards, checkers, `Trace` |
-| `rivet-vpi` | VPI backend (Icarus, GHDL, and the catalogued quirks for the commercial tools) |
-| `rivet-vhpi` | VHPI backend (NVC; Questa and Riviera unverified) |
-| `rivet-verilator` | Verilator build helper, C++ shim, simulation main loop |
-| `rivet-mock` | pure-Rust event simulator, so the harness can be tested without an EDA tool |
-| `rivet-manifest` | `rivet.toml` |
-| `rivet-cli` | the `rivet` command |
-| `integrations/edalize` | Edalize tool backend (`fusesoc run --tool rivet`) |
-| `python/rivet_py` | Python bindings to the kit, for cocotb testbenches |
+That last row is the one to read carefully. Rivet carries the launch flow and
+every catalogued workaround for those five tools, but nobody has ever run it on
+one. If you have a licence, [`examples/conformance`](examples/conformance) is
+the suite to point at it, and
+[`docs/SIMULATOR-QUIRKS.md`](docs/SIMULATOR-QUIRKS.md) marks every per-simulator
+behaviour as observed or merely inherited from cocotb.
 
 ## Requirements
 
-Rust 1.87 or later (checked in CI), and one of: Icarus Verilog 11+,
-Verilator 5.x with a C++17 compiler, GHDL 4.x, or NVC 1.17+.
+- [Rust](https://rustup.rs) 1.87 or later (checked in CI)
+- One of: [Icarus Verilog](https://steveicarus.github.io/iverilog/) 11+,
+  [Verilator](https://verilator.org) 5.x with a C++17 compiler,
+  [GHDL](https://ghdl.github.io/ghdl/) 4.x, or [NVC](https://www.nickg.me.uk/nvc/) 1.17+
+- macOS and Linux. Windows is not supported.
+
+## Install
+
+Rivet is not on crates.io yet, so build the CLI from a checkout:
+
+```sh
+git clone https://github.com/A-Ravioli/rivet && cd rivet
+cargo build -p rivet-cli
+```
+
+Then scaffold a testbench crate that passes as generated:
+
+```sh
+target/debug/rivet new counter --path "$PWD"
+target/debug/rivet run --sim icarus -C counter
+```
+
+```
+TEST                           STATUS          SIM TIME        WALL
+counter::counts_when_enabled   PASS               225ns      0.000s
+counter::load_overrides_count  PASS                40ns      0.000s
+
+RIVET_RESULT passed=2 failed=0 skipped=0 seed=2582011094885115739
+rivet: 2 tests, 0 failed, 0 skipped (counter/sim_build/icarus/results.xml)
+```
+
+`--path` points the new crate at your checkout. Swap `--sim icarus` for
+`verilator`, `ghdl` or `nvc`; the testbench does not change.
+
+## How it works
+
+Your test crate builds as a `cdylib`. `rivet run` compiles the design described
+by `rivet.toml`, hands the simulator that library as a VPI or VHPI plugin, and
+the simulator loads it the way it would load any other PLI module. Inside,
+Rivet's executor runs on the simulator's own thread — no threads to
+synchronise, no interpreter, no IPC. Triggers are simulator callbacks;
+`.await` returns when the callback fires.
+
+Verilator's VPI is too limited to drive a harness through, so there the crate
+builds as a binary that links the Verilated model instead, and Rivet reads and
+writes signals directly in the model's storage — using VPI only to be told
+when a value changed.
+
+The two chapters worth reading are
+[the timing model](docs/book/src/timing-model.md) — what `ReadWrite` and
+`ReadOnly` mean, and why an edge returns before the HDL reacts to it — and
+[simulators](docs/book/src/simulators.md), on what each tool can and cannot
+tell a harness.
+
+## Related
+
+- [cocotb](https://www.cocotb.org) — the project Rivet is a reimplementation of,
+  and still the right answer if you need pyuvm, numpy or a commercial simulator
+  today. [`docs/design/00-cocotb-analysis.md`](docs/design/00-cocotb-analysis.md)
+  is a file-by-file study of it; every design decision here came out of that.
+- [marlin](https://github.com/ethanuppal/marlin) — imports hardware modules
+  into Rust as structs via procedural macros and `dlopen`, Verilator-focused,
+  with support for Spade and Veryl. Different bet: Rivet keeps cocotb's
+  simulator-agnostic timing model and drives four simulators through their
+  standard PLIs.
+- [verilated-rs](https://github.com/djg/verilated-rs) — statically links
+  Verilated bindings from a build script; unmaintained.
 
 ## Development
 
 ```sh
-# No EDA tool needed: the harness is tested against a pure-Rust simulator,
-# and the CLI's end-to-end tests skip themselves when their tool is missing.
+# No simulator needed: the harness is tested against a pure-Rust one, and the
+# CLI's end-to-end tests skip themselves when their tool is missing.
 cargo test -p rivet-core -p rivet-mock -p rivet-kit -p rivet-cli
-cargo test --workspace          # adds the examples, which need Icarus installed
+cargo test --workspace     # adds the examples, which do need Icarus
 cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
+mdbook serve docs/book
 ```
 
-What each layer covers, and what it deliberately does not, is in
-[`docs/testing.md`](docs/testing.md).
+[`docs/testing.md`](docs/testing.md) says what each layer covers, what it does
+not, and every defect the suites have caught so far.
+[`docs/design/`](docs/design/README.md) has the architecture and the status of
+each milestone.
 
 ## License
 
