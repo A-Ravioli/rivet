@@ -94,7 +94,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends iverilog
           python3 -m venv /tmp/wheeltest
           /tmp/wheeltest/bin/pip install python/rivet/dist/*.whl
-          mkdir -p /tmp/proj && cp python/rivet/examples/counter/* /tmp/proj/
+          # Named files, not a glob: an earlier step in this job leaves
+          # sim_build/ and __pycache__/ here, and plain cp fails on those.
+          mkdir -p /tmp/proj
+          cp python/rivet/examples/counter/counter.v \
+             python/rivet/examples/counter/rivet.toml \
+             python/rivet/examples/counter/test_counter.py /tmp/proj/
           cd /tmp/proj && PATH=/tmp/wheeltest/bin:/usr/bin:/bin rivet run --sim icarus
       - uses: actions/upload-artifact@v4
         with:
