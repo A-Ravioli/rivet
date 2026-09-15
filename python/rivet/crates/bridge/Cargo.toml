@@ -1,0 +1,26 @@
+[package]
+name = "rivet-bridge"
+description = "Drives Python coroutines on Rivet's native executor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "rivet_bridge"
+crate-type = ["rlib"]
+
+[dependencies]
+pyo3 = { workspace = true }
+rivet-core = { workspace = true }
+rivet-kit = { workspace = true }
+rivet-mock = { workspace = true, optional = true }
+log = { workspace = true }
+
+[features]
+default = ["mock"]
+# The pure-Rust simulator, so the Python surface is testable with no
+# simulator installed. Carried in the wheel; harmless in the plugin.
+mock = ["dep:rivet-mock"]

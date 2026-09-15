@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.87%2B-orange)](https://rustup.rs)
 [![Simulators](https://img.shields.io/badge/simulators-Icarus%20%7C%20Verilator%20%7C%20GHDL%20%7C%20NVC-informational)](#simulators)
 
-**[Read the book](docs/book/src/introduction.md)** | **[Migrating from cocotb](docs/migration.md)** | **[Benchmarks](docs/benchmarks.md)**
+**[Read the book](docs/book/src/introduction.md)** | **[Testbenches in Python](docs/python.md)** | **[Migrating from cocotb](docs/migration.md)** | **[Benchmarks](docs/benchmarks.md)**
 
 Rivet drives HDL simulators from Rust `async` testbenches. It keeps everything
 cocotb got right — the timing model, `RisingEdge`, `ReadWrite`, `ReadOnly`,
@@ -87,6 +87,62 @@ and 19.99 µs/cycle driven by Rivet. The harness is about a quarter of the run,
 and a monitor task watching the memory bus every cycle adds nothing measurable.
 Method, medians, spread and caveats in [`docs/benchmarks.md`](docs/benchmarks.md).
 
+## Python, if you want it
+
+Not every team wants to write Rust, and the scheduler is the expensive
+part anyway — not the language the testbench is written in. So the same
+harness takes Python:
+
+```python
+import rivet
+
+@rivet.test(timeout="100us")
+async def counts_when_enabled(dut):
+    clk = dut.signal("clk")
+    rivet.Clock(clk, "10ns").start()
+
+    dut.signal("rst_n").set(0)
+    await clk.rising_edge(n=2)
+    dut.signal("rst_n").set(1)
+
+    count = dut.signal("count")
+    dut.signal("en").set(1)
+    for i in range(1, 21):
+        await clk.rising_edge()
+        await rivet.read_only()
+        assert count.get() == i, f"cycle {i}"
+        await rivet.next_time_step()
+```
+
+```sh
+rivet run --python --sim icarus
+```
+
+No crate, no `cargo`, no compile step. The interpreter sits *on top of*
+the scheduler rather than underneath it: Rivet's executor still owns the
+scheduling, a trigger is still a simulator callback, and a coroutine is
+one more task on it — entered once per `await`.
+
+Icarus Verilog 12.0, 20 000 cycles, median of 3 runs, µs per simulated
+cycle, all three measured on one machine:
+
+| What the testbench does | cocotb 2.1 | Rivet (Python) | Rivet (Rust) |
+|---|---|---|---|
+| await an edge every cycle | 23.5 µs | **3.02 µs** | 2.24 µs |
+| edge, write 32-bit, read 32-bit and 512-bit | 267 µs | **8.26 µs** | 6.27 µs |
+| 100 tasks awaiting every edge | 294 µs | **84.9 µs** | 20.6 µs |
+
+Python costs 1.3×–1.6× over Rust on the ordinary shapes and about 4× on
+that last row, where a hundred coroutines wake every cycle. Against that,
+two numbers are worth more than the table: a running clock nobody awaits
+costs the same in Python as in Rust, because `rivet.Clock` is a native
+task; and `await clk.rising_edge(n=20000)` costs 2.20 µs per cycle,
+because it enters the interpreter once instead of twenty thousand times.
+Write a Python testbench that way and it costs what a Rust one costs.
+
+[`docs/python.md`](docs/python.md) has the API, the cost model, the
+cocotb translation table and how to reproduce the numbers.
+
 ## Features
 
 - Works on four simulators, two HDLs, two PLIs — Icarus, Verilator, GHDL, NVC
@@ -103,6 +159,8 @@ Method, medians, spread and caveats in [`docs/benchmarks.md`](docs/benchmarks.md
   `results.xml`
 - It is an ordinary Rust crate: your editor, your debugger, `cargo add`
   anything you want in a testbench
+- Or write it in Python — same scheduler, same kit, same `results.xml`,
+  7×–32× faster than cocotb on the same design ([`docs/python.md`](docs/python.md))
 
 ## Simulators
 
@@ -200,6 +258,11 @@ cargo test -p rivet-core -p rivet-mock -p rivet-kit -p rivet-cli
 cargo test --workspace     # adds the examples, which do need Icarus
 cargo clippy --workspace --all-targets -- -D warnings
 mdbook serve docs/book
+
+# The Python layer is a second workspace (it needs libpython to build).
+cd python/rivet
+cargo build -p rivet-python-ext && mkdir -p build && cp target/debug/lib_rivet.so build/_rivet.so
+(cd tests && python3 -m unittest discover)
 ```
 
 [`docs/testing.md`](docs/testing.md) says what each layer covers, what it does

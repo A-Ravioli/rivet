@@ -48,6 +48,24 @@ listed under "Changed" with the migration in one line.
 
 ### Added
 
+- **Testbenches in Python.** `@rivet.test` on an `async def`, driven by
+  Rivet's own executor rather than an interpreter-owned scheduler: a
+  trigger is a simulator callback and a coroutine is one more task on the
+  executor, entered once per `await`. `rivet run --python` needs no crate
+  and no `cargo`; a `[python]` section in `rivet.toml` names the modules to
+  import. Measured against cocotb 2.1 on the same design, simulator and
+  machine: 7.8x on an edge per cycle, 32.3x on per-cycle value traffic,
+  3.5x with a hundred tasks awaiting every edge — and 1.3x-1.6x slower than
+  the Rust API, which is the honest cost of the interpreter. Clocks and the
+  kit are native tasks that cost a Python testbench nothing, and
+  `await clk.rising_edge(n=...)` waits many cycles for one resume.
+  See `docs/python.md`; sources in `python/rivet`.
+- `rivet.mock`: Rivet's mock simulator driven from Python, so a Python
+  testbench (and this bridge's own test suite) runs with no simulator
+  installed.
+- `rivet-core::test::TestSpec` and `run_regression_specs`, so tests
+  discovered at run time go through the same regression loop, seeding,
+  timeouts and `results.xml` as `#[rivet::test]`.
 - VHPI backend (`rivet-vhpi`) and the `nvc` simulator flow, so VHDL designs
   run on NVC as well as on GHDL through VPI.
 - `rivet new` scaffolds a testbench crate that runs without further edits.
@@ -72,6 +90,10 @@ listed under "Changed" with the migration in one line.
 
 ### Changed
 
+- `rivet-vpi` and `rivet-vhpi` gained a default `startup-table` feature.
+  It is on unless turned off, so nothing changes for a test crate; the
+  Python plugin turns it off because a shared object can export only one
+  PLI startup table and it exports its own.
 - Minimum supported Rust version is 1.87, checked in CI.
 - `ObjKind`, `Error`, `BackendError`, `Outcome` and `Phase` are
   `#[non_exhaustive]`; match them with a wildcard arm.

@@ -24,6 +24,10 @@
 //! args = ["-Wno-WIDTH"]
 //! trace = true
 //! timing = false
+//!
+//! [python]                  # optional: the testbench is in Python
+//! tests = ["test_counter"]
+//! paths = ["tb"]
 //! ```
 
 use serde::Deserialize;
@@ -35,6 +39,9 @@ pub struct Manifest {
     pub design: Design,
     #[serde(default)]
     pub sim: BTreeMap<String, SimConfig>,
+    /// Present when the testbench is written in Python.
+    #[serde(default)]
+    pub python: Option<Python>,
     /// Directory the manifest was loaded from; paths are relative to it.
     #[serde(skip)]
     pub dir: PathBuf,
@@ -59,6 +66,21 @@ pub struct Design {
     /// design once per set (`[design.param_sets.w16] WIDTH = "16"`).
     #[serde(default)]
     pub param_sets: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+/// A Python testbench: which modules hold the tests, and where to find
+/// them.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Python {
+    /// Modules to import at start of simulation. Importing them is what
+    /// runs their `@rivet.test` decorators, which is what registers the
+    /// tests.
+    #[serde(default)]
+    pub tests: Vec<String>,
+    /// Extra `sys.path` entries, relative to the manifest. The manifest's
+    /// own directory is always on the path.
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -14,3 +14,11 @@ readme = "README.md"
 [dependencies]
 rivet-core = { workspace = true }
 log = { workspace = true }
+
+[features]
+default = ["startup-table"]
+# The exported `vlog_startup_routines` table the simulator scans. On by
+# default; a library that embeds this backend but needs to run its own
+# code at load time (the Python plugin) turns it off and exports its own,
+# because the symbol can only be defined once in a shared object.
+startup-table = []

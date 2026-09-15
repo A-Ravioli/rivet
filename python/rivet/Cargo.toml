@@ -1,0 +1,25 @@
+# A second workspace: these crates need a Python interpreter to build, so
+# they stay out of the root one (`cargo test --workspace` must not need
+# libpython). Built on their own with maturin or `cargo build`.
+[workspace]
+resolver = "2"
+members = ["crates/bridge", "crates/ext", "crates/plugin"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/A-Ravioli/rivet"
+publish = false
+
+[workspace.dependencies]
+pyo3 = { version = "0.23", default-features = false, features = ["macros"] }
+rivet-core = { path = "../../crates/rivet-core" }
+rivet-kit = { path = "../../crates/rivet-kit" }
+rivet-mock = { path = "../../crates/rivet-mock" }
+rivet-bridge = { path = "crates/bridge" }
+log = { version = "0.4", features = ["std"] }
+
+[profile.release]
+debug = 1

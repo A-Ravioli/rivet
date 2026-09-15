@@ -1,0 +1,28 @@
+[package]
+name = "rivet-python-plugin"
+description = "VPI/VHPI plugin that embeds CPython and runs Rivet's Python testbenches"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "rivet_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+# `auto-initialize` is not used: the interpreter is started explicitly at
+# start-of-simulation, after the inittab entry is in place.
+pyo3 = { workspace = true }
+rivet-bridge = { workspace = true }
+rivet-core = { workspace = true }
+log = { workspace = true }
+rivet-vpi = { path = "../../../../crates/rivet-vpi", default-features = false, optional = true }
+rivet-vhpi = { path = "../../../../crates/rivet-vhpi", default-features = false, optional = true }
+
+[features]
+default = ["vpi"]
+vpi = ["dep:rivet-vpi"]
+vhpi = ["dep:rivet-vhpi"]

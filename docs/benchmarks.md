@@ -1,5 +1,10 @@
 # Benchmarks
 
+> Writing the testbench in Python instead of Rust has its own measured
+> cost, compared against cocotb on the same design and machine:
+> [`python.md`](python.md#what-it-costs-measured).
+
+
 Harness overhead per clock cycle, measured with `examples/bench` (Rivet) and
 `examples/bench/cocotb` (cocotb 2.1.0), 100 000 cycles, one run each, on the
 same container. Verilator 5.020 and Icarus Verilog 12.0. Times are wall-clock

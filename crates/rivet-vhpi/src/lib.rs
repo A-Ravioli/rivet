@@ -1185,11 +1185,13 @@ pub fn startup() {
     }
 }
 
+#[cfg(feature = "startup-table")]
 unsafe extern "C" fn rivet_vhpi_startup_routine() {
     let _ = catch_unwind(startup);
 }
 
 /// The table a VHPI simulator scans when loading the library.
+#[cfg(feature = "startup-table")]
 #[no_mangle]
 pub static vhpi_startup_routines: [Option<unsafe extern "C" fn()>; 2] = [Some(rivet_vhpi_startup_routine), None];
 
@@ -1199,6 +1201,7 @@ pub static vhpi_startup_routines: [Option<unsafe extern "C" fn()>; 2] = [Some(ri
 /// # Safety
 /// Must be called from the simulator's thread, once, before any other
 /// Rivet API.
+#[cfg(feature = "startup-table")]
 #[no_mangle]
 pub unsafe extern "C" fn vhpi_startup_routines_bootstrap() {
     for r in vhpi_startup_routines.iter().flatten() {
