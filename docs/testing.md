@@ -8,6 +8,7 @@ What is tested, where, and what the suites found.
 |---|---|---|---|
 | Values (`LogicVec`, `Logic`), time units and rounding, Fx hash, result selection and XML escaping, seeded random (`Rng`, ranges, weights, per-test streams), functional coverage (bins, ignore/illegal, crosses, JSON), JSON log records and per-test log files | `crates/rivet-core/src/*.rs` unit tests | nothing | 36 |
 | Manifest parsing, parameter sets | `crates/rivet-manifest` | nothing | 2 |
+| Every cargo workspace resolves, including the two under `python/` that the root workspace does not contain | `ci/check-workspaces.py` | nothing | 3 |
 | `#[rivet::test]` attribute parsing (`timeout`, `wall_timeout`, `params`, `param_sets`) | `crates/rivet-macros` | nothing | 1 |
 | Bindgen code generation (parsed back with `syn`, typedef enums and packed structs, two-dimensional array binders, Icarus-internal scopes skipped), SystemVerilog typedef parsing and literal evaluation, coverage merging and rendering, watch fingerprints, results.json round trip, sharding, libtest-style selection, argument parsing, the `rivet new` scaffold | `crates/rivet-cli/src/*.rs` unit tests | nothing | 16 |
 | VHPI decoding: quoted literals, an enumeration classified by its literals (so `std_logic`, `bit`, `boolean` and `character` are told apart), VHPI time round trip | `crates/rivet-vhpi/src/lib.rs` unit tests | nothing | 3 |

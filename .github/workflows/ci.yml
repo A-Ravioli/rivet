@@ -137,6 +137,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Metadata crates.io requires
         run: python3 ci/check-package-metadata.py
+      - name: Every workspace still resolves
+        # The two under python/ are outside the root workspace, so
+        # `cargo test --workspace` never checks them.
+        run: python3 ci/check-workspaces.py
       - name: Package the crates with no internal dependencies
         # The rest cannot be packaged until their path dependencies exist in
         # the registry, which happens during the first release.

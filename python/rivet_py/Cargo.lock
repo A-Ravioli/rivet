@@ -153,19 +153,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "rivet-core"
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
+name = "rivet-hdl-core"
 version = "0.1.0"
 dependencies = [
  "inventory",
  "log",
+ "regex-lite",
 ]
 
 [[package]]
-name = "rivet-kit"
+name = "rivet-hdl-kit"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-core",
+ "rivet-hdl-core",
 ]
 
 [[package]]
@@ -173,8 +180,8 @@ name = "rivet-py"
 version = "0.1.0"
 dependencies = [
  "pyo3",
- "rivet-core",
- "rivet-kit",
+ "rivet-hdl-core",
+ "rivet-hdl-kit",
 ]
 
 [[package]]
