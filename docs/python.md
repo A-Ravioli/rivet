@@ -60,31 +60,42 @@ implementations of one testbench in
 Python on cocotb
 ([`cocotb/test_bench.py`](../examples/bench/cocotb/test_bench.py)).
 
-Icarus Verilog 12.0, 20 000 cycles, median of 3 runs with the range in
+Icarus Verilog 12.0, 20 000 cycles, median of 7 runs with the range in
 brackets, µs of wall-clock per simulated clock cycle:
 
 | benchmark | cocotb 2.1 | Rivet (Python) | Rivet (Rust) | Python vs cocotb |
 |---|---|---|---|---|
-| `edge_roundtrip` — await an edge every cycle | 23.49 (23.11–24.56) | 3.02 (2.87–4.39) | 2.24 (2.16–2.28) | **7.8×** |
-| `value_traffic` — edge, write 32-bit, read 32-bit and 512-bit | 267.01 (266.36–269.03) | 8.26 (8.06–9.03) | 6.27 (6.18–6.56) | **32.3×** |
-| `edge_then_readonly` — edge, write, `ReadOnly`, read | 37.39 (36.22–38.01) | 5.47 (5.39–5.55) | 3.48 (3.37–3.53) | **6.8×** |
-| `many_tasks` — 100 tasks awaiting every edge | 293.95 (290.72–310.82) | 84.88 (84.81–86.12) | 20.61 (19.64–20.83) | **3.5×** |
+| `edge_roundtrip` — await an edge every cycle | 22.79 (20.55–23.72) | 2.89 (2.86–3.05) | 2.24 (2.21–2.39) | **7.9×** |
+| `value_traffic` — edge, write 32-bit, read 32-bit and 512-bit | 265.53 (259.42–272.18) | 8.04 (7.95–8.48) | 6.29 (6.20–6.62) | **33.0×** |
+| `edge_then_readonly` — edge, write, `ReadOnly`, read | 36.99 (33.07–39.98) | 5.46 (5.36–5.87) | 3.48 (3.32–3.88) | **6.8×** |
+| `many_tasks` — 100 tasks awaiting every edge | 293.23 (250.05–304.23) | 86.71 (86.51–88.99) | 20.02 (19.77–21.59) | **3.4×** |
 
 Shapes cocotb has no equivalent for:
 
 | benchmark | Rivet (Python) | Rivet (Rust) |
 |---|---|---|
-| `timer_only` — no clock, no value-change callbacks | 0.95 (0.93–1.06) | 0.26 (0.24–0.34) |
-| `clock_only` — clock running, nobody awaiting it | 1.86 (1.52–1.94) | 1.79 (1.75–2.04) |
-| `batched_edges` — the same N cycles in one `await` | 2.20 (1.91–2.21) | — |
+| `timer_only` — no clock, no value-change callbacks | 0.93 (0.93–1.48) | 0.25 (0.24–0.26) |
+| `clock_only` — clock running, nobody awaiting it | 1.83 (1.78–2.05) | 1.75 (1.73–1.80) |
+| `batched_edges` — the same N cycles in one `await` | 2.17 (2.13–2.26) | — |
 
 Reproduce it:
 
 ```sh
 cargo build --release -p rivet-hdl-cli
 pip install cocotb                      # for the cocotb column
-ci/bench-python.py --repeat 3 --cycles 20000
+ci/bench-python.py --repeat 7 --cycles 20000
 ```
+
+Seven repeats, not three: at three the run-to-run spread on these
+micro-benchmarks is wide enough to move a median by 10–15%, which is
+larger than several of the differences in the table. At seven the ranges
+close to a few per cent.
+
+The wheel is not slower than a checkout build. `pip install rivet-hdl`
+and the same benchmark outside the tree gives 2.97 µs on
+`edge_roundtrip`, 8.09 on `value_traffic` and 2.22 on `batched_edges` —
+the same numbers. Stripping the bundled binaries drops debug sections,
+not code.
 
 ### Reading that table honestly
 
@@ -100,21 +111,21 @@ gap to Rust is 4×, because the part that does not scale is exactly the
 part that is still Python.
 
 **`clock_only` is the best case and it is the more interesting one.**
-Python and Rust are the same speed, because `rivet.Clock` is a native
-task: no Python runs per edge, however many cycles the test takes.
+Python and Rust are the same speed — 1.83 µs against 1.75, and the two
+ranges overlap — because `rivet.Clock` is a native task: no Python runs per edge, however many cycles the test takes.
 Everything that works this way — clocks, the kit, `await
 clk.rising_edge(n=...)` — costs a Python testbench nothing at all.
 
 **`batched_edges` is the lesson.** Twenty thousand cycles skipped in one
-`await` costs 2.20 µs per cycle against `edge_roundtrip`'s 3.02 — it lands
-where Rust does, because it enters the interpreter once instead of twenty
+`await` costs 2.17 µs per cycle against `edge_roundtrip`'s 2.89 — it lands
+where Rust does (2.24), because it enters the interpreter once instead of twenty
 thousand times.
 
 **These are harness-overhead micro-benchmarks and they flatter everyone.**
 On a real design, the simulator's own work dominates: the PicoRV32
 measurement in [`benchmarks.md`](benchmarks.md) costs 15.27 µs per cycle
-with no harness at all. Against that, the difference between 2.24 and 3.02
-µs of harness is a few per cent of the run, not 35%.
+with no harness at all. Against that, the difference between 2.24 and 2.89
+µs of harness is a few per cent of the run, not 29%.
 
 ### Writing a fast testbench
 

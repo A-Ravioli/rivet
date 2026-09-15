@@ -123,20 +123,20 @@ the scheduler rather than underneath it: Rivet's executor still owns the
 scheduling, a trigger is still a simulator callback, and a coroutine is
 one more task on it — entered once per `await`.
 
-Icarus Verilog 12.0, 20 000 cycles, median of 3 runs, µs per simulated
+Icarus Verilog 12.0, 20 000 cycles, median of 7 runs, µs per simulated
 cycle, all three measured on one machine:
 
 | What the testbench does | cocotb 2.1 | Rivet (Python) | Rivet (Rust) |
 |---|---|---|---|
-| await an edge every cycle | 23.5 µs | **3.02 µs** | 2.24 µs |
-| edge, write 32-bit, read 32-bit and 512-bit | 267 µs | **8.26 µs** | 6.27 µs |
-| 100 tasks awaiting every edge | 294 µs | **84.9 µs** | 20.6 µs |
+| await an edge every cycle | 22.8 µs | **2.89 µs** | 2.24 µs |
+| edge, write 32-bit, read 32-bit and 512-bit | 266 µs | **8.04 µs** | 6.29 µs |
+| 100 tasks awaiting every edge | 293 µs | **86.7 µs** | 20.0 µs |
 
 Python costs 1.3×–1.6× over Rust on the ordinary shapes and about 4× on
 that last row, where a hundred coroutines wake every cycle. Against that,
 two numbers are worth more than the table: a running clock nobody awaits
 costs the same in Python as in Rust, because `rivet.Clock` is a native
-task; and `await clk.rising_edge(n=20000)` costs 2.20 µs per cycle,
+task; and `await clk.rising_edge(n=20000)` costs 2.17 µs per cycle,
 because it enters the interpreter once instead of twenty thousand times.
 Write a Python testbench that way and it costs what a Rust one costs.
 

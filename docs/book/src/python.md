@@ -59,14 +59,14 @@ it.
 ## What that costs
 
 Same design, same simulator, same machine. Icarus Verilog 12.0, 20 000
-cycles, median of 3 runs, µs of wall-clock per simulated cycle:
+cycles, median of 7 runs, µs of wall-clock per simulated cycle:
 
 | benchmark | cocotb 2.1 | Rivet (Python) | Rivet (Rust) |
 |---|---|---|---|
-| await an edge every cycle | 23.49 | **3.02** | 2.24 |
-| edge, write 32-bit, read 32-bit and 512-bit | 267.01 | **8.26** | 6.27 |
-| edge, write, `ReadOnly`, read | 37.39 | **5.47** | 3.48 |
-| 100 tasks awaiting every edge | 293.95 | **84.88** | 20.61 |
+| await an edge every cycle | 22.79 | **2.89** | 2.24 |
+| edge, write 32-bit, read 32-bit and 512-bit | 265.53 | **8.04** | 6.29 |
+| edge, write, `ReadOnly`, read | 36.99 | **5.46** | 3.48 |
+| 100 tasks awaiting every edge | 293.23 | **86.71** | 20.02 |
 
 Python costs about 1.3× to 1.6× over Rust on the ordinary shapes, and
 about 4× when a hundred tasks each wake every cycle — which is the honest
@@ -74,18 +74,19 @@ version of the tradeoff, because that last row is a hundred coroutine
 resumes per cycle and nothing can make it not be.
 
 Two rows not in the table say more about how to write one. A clock that
-nobody awaits costs the same in Python as in Rust (1.86 µs against 1.79),
-because `rivet.Clock` is a native task. And twenty thousand cycles waited
-for in a single `await clk.rising_edge(n=20000)` cost 2.20 µs per cycle —
-Rust's number — because the interpreter is entered once instead of twenty
-thousand times.
+nobody awaits costs the same in Python as in Rust (1.83 µs against 1.75,
+ranges overlapping), because `rivet.Clock` is a native task. And twenty
+thousand cycles waited for in a single `await clk.rising_edge(n=20000)`
+cost 2.17 µs per cycle — Rust's number — because the interpreter is
+entered once instead of twenty thousand times.
 
 So the rule for a fast Python testbench is: do not write a per-cycle
 Python loop you do not need, and let the native side run the repetitive
 parts. Clocks, `Memory`, `Scoreboard`, `Covergroup` and `Rng` are all
 native already.
 
-Reproduce the table with `ci/bench-python.py --repeat 3 --cycles 20000`.
+Reproduce the table with `ci/bench-python.py --repeat 7 --cycles 20000`.
+Three repeats is too few: the spread moves a median by 10–15%.
 
 ## Which to write
 

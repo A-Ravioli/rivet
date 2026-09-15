@@ -6,8 +6,8 @@ benchmarks (`examples/bench/`) on the same design and the same simulator,
 in this process's own environment. Each is repeated and the median
 reported, because a single run of any of them says very little.
 
-    ci/bench-python.py --repeat 5 --cycles 20000
-    ci/bench-python.py --repeat 3 --cycles 5000 --skip cocotb
+    ci/bench-python.py --repeat 7 --cycles 20000
+    ci/bench-python.py --repeat 3 --cycles 5000 --skip cocotb   # quick look
 
 Needs a simulator (Icarus by default) and, for the cocotb column,
 cocotb installed. Anything missing is reported as a gap rather than
@@ -94,7 +94,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sim", default="icarus")
     ap.add_argument("--cycles", type=int, default=20000)
-    ap.add_argument("--repeat", type=int, default=3)
+    # Seven, not three: at three the run-to-run spread on these
+    # micro-benchmarks moves a median by 10-15%, which is more than
+    # several of the differences being measured.
+    ap.add_argument("--repeat", type=int, default=7)
     ap.add_argument("--release", action="store_true", default=True)
     ap.add_argument("--debug", dest="release", action="store_false",
                     help="measure a debug build (much slower; not comparable to published numbers)")
