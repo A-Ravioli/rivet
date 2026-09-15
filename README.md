@@ -189,11 +189,29 @@ behaviour as observed or merely inherited from cocotb.
 
 ## Install
 
-Rivet is not on crates.io yet, so build the CLI from a checkout:
+The crates are `rivet-hdl*` on crates.io and the wheel is `rivet-hdl` on
+PyPI — plain `rivet` was taken on both. The names you *write* are
+unchanged: `use rivet::prelude::*` in Rust, `import rivet` in Python.
+
+For a Python testbench, one wheel carries everything, the `rivet` CLI and
+the PLI plugin included:
+
+```sh
+pip install rivet-hdl
+rivet run --python --sim icarus
+```
+
+For a Rust testbench:
+
+```sh
+cargo install rivet-hdl-cli
+```
+
+Or from a checkout, which is what the rest of this section assumes:
 
 ```sh
 git clone https://github.com/A-Ravioli/rivet && cd rivet
-cargo build -p rivet-cli
+cargo build -p rivet-hdl-cli
 ```
 
 Then scaffold a testbench crate that passes as generated:
@@ -254,7 +272,7 @@ tell a harness.
 ```sh
 # No simulator needed: the harness is tested against a pure-Rust one, and the
 # CLI's end-to-end tests skip themselves when their tool is missing.
-cargo test -p rivet-core -p rivet-mock -p rivet-kit -p rivet-cli
+cargo test -p rivet-hdl-core -p rivet-hdl-mock -p rivet-hdl-kit -p rivet-hdl-cli
 cargo test --workspace     # adds the examples, which do need Icarus
 cargo clippy --workspace --all-targets -- -D warnings
 mdbook serve docs/book

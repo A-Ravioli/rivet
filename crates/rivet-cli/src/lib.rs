@@ -347,13 +347,15 @@ fn python_plugin(opts: &Opts) -> Result<PathBuf, String> {
         tried.push(ws.join("Cargo.toml"));
     }
 
-    // An installed wheel puts the plugin beside the Python package.
+    // An installed wheel carries the plugin in the package's `_bin`
+    // directory, beside the `rivet` binary this may well be.
     if let Some(dir) = installed_rivet_package() {
-        let c = dir.join(&file);
-        if c.exists() && !vhpi {
-            return Ok(c);
+        for c in [dir.join("_bin").join(&file), dir.join(&file)] {
+            if c.exists() && !vhpi {
+                return Ok(c);
+            }
+            tried.push(c);
         }
-        tried.push(c);
     }
 
     Err(format!(

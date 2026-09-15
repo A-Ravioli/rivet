@@ -24,7 +24,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: dff example on Icarus
         run: target/debug/rivet run --sim icarus -C examples/dff
       - name: dff example on Verilator
@@ -83,7 +83,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Kit tests with an embedded interpreter
-        run: cargo test -p rivet-kit --features python
+        run: cargo test -p rivet-hdl-kit --features python
 
   macos:
     name: macOS
@@ -96,7 +96,7 @@ jobs:
       - name: Unit and mock-simulator tests
         run: cargo test --workspace --no-fail-fast
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: dff example on Icarus
         run: target/debug/rivet run --sim icarus -C examples/dff
       - name: fifo example on Icarus
@@ -142,7 +142,7 @@ jobs:
         # the registry, which happens during the first release.
         run: |
           set -eu
-          for c in rivet-core rivet-macros rivet-manifest; do
+          for c in rivet-hdl-core rivet-hdl-macros rivet-hdl-manifest; do
             cargo package -p "$c" --no-verify
           done
 
@@ -174,7 +174,7 @@ jobs:
           make -j"$(nproc)"
           sudo make install
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: VHDL examples on NVC
         run: |
           export PATH=/opt/nvc/bin:$PATH
@@ -216,7 +216,7 @@ jobs:
           mkdir -p build && cp target/debug/lib_rivet.so build/_rivet.so
           cd tests && python -m unittest discover -v
       - name: Build the CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: The counter example on Icarus, through the plugin
         run: target/debug/rivet run --python --sim icarus -C python/rivet/examples/counter
       - name: A failing test is reported as failing
@@ -233,12 +233,17 @@ jobs:
           test "$status" -ne 0 || { echo "a failing test must not exit 0"; exit 1; }
           grep -q "this assertion is meant to fail" /tmp/out.txt
           grep -q "test_python_failure.py" /tmp/out.txt
-      - name: Wheel
+      - name: Wheel, with the CLI and the plugin in it
         working-directory: python/rivet
+        run: python3 build-wheel.py --out dist
+      - name: The wheel alone runs a testbench
+        # No checkout on the path, no cargo, no Rust: what a user gets from
+        # `pip install rivet-hdl`.
         run: |
-          maturin build --release -o dist
-          pip install dist/*.whl
-          cd /tmp && python -c "import rivet; print(rivet.__version__)"
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install python/rivet/dist/*.whl
+          mkdir -p /tmp/proj && cp python/rivet/examples/counter/* /tmp/proj/
+          cd /tmp/proj && PATH=/tmp/wheeltest/bin:/usr/bin:/bin rivet run --sim icarus
 
   python-integrations:
     # The Edalize/FuseSoC backend and the rivet_py shim for cocotb.
@@ -255,7 +260,7 @@ jobs:
           pip install maturin fusesoc edalize cocotb
           pip install -e integrations/edalize
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: FuseSoC runs the dff example through the rivet Edalize backend
         env:
           RIVET_BIN: ${{ github.workspace }}/target/debug/rivet
@@ -297,7 +302,7 @@ jobs:
           git clone --depth 1 --branch v5.036 https://github.com/verilator/verilator.git /tmp/verilator
           cd /tmp/verilator && autoconf && ./configure --prefix=/opt/verilator-5.036 && make -j"$(nproc)" && sudo make install
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: Examples on Verilator 5.036
         env:
           VERILATOR: /opt/verilator-5.036/bin/verilator

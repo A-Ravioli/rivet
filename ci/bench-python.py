@@ -49,7 +49,7 @@ def run(cmd, cycles, cwd=None):
 def rivet_binary(release):
     exe = ROOT / "target" / ("release" if release else "debug") / "rivet"
     if not exe.exists():
-        raise SystemExit(f"{exe} is missing; run `cargo build {'--release ' if release else ''}-p rivet-cli`")
+        raise SystemExit(f"{exe} is missing; run `cargo build {'--release ' if release else ''}-p rivet-hdl-cli`")
     return exe
 
 

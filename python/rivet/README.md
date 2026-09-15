@@ -24,8 +24,13 @@ async def counts_when_enabled(dut):
 ```
 
 ```sh
+pip install rivet-hdl
 rivet run --python --sim icarus
 ```
+
+The distribution is `rivet-hdl`; the import is `rivet`. One wheel carries
+the package, the bindings, the `rivet` CLI and the PLI plugin, so nothing
+else is needed but a simulator.
 
 Full documentation: [`docs/python.md`](../../docs/python.md).
 
@@ -57,8 +62,9 @@ mkdir -p build && cp target/debug/lib_rivet.so build/_rivet.so
 cargo build --release -p rivet-python-plugin
 cargo build --release -p rivet-python-plugin --no-default-features --features vhpi   # NVC
 
-# A wheel.
-maturin build --release
+# A wheel, with the CLI and the plugin in it. `maturin build` alone makes
+# a wheel that can import `rivet` but cannot run a simulator.
+python3 build-wheel.py --out dist
 ```
 
 Building anything here needs a Python development install: `libpython`

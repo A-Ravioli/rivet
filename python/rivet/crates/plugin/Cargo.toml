@@ -19,8 +19,8 @@ pyo3 = { workspace = true }
 rivet-bridge = { workspace = true }
 rivet-core = { workspace = true }
 log = { workspace = true }
-rivet-vpi = { path = "../../../../crates/rivet-vpi", default-features = false, optional = true }
-rivet-vhpi = { path = "../../../../crates/rivet-vhpi", default-features = false, optional = true }
+rivet-vpi = { package = "rivet-hdl-vpi", path = "../../../../crates/rivet-vpi", default-features = false, optional = true }
+rivet-vhpi = { package = "rivet-hdl-vhpi", path = "../../../../crates/rivet-vhpi", default-features = false, optional = true }
 
 [features]
 default = ["vpi"]

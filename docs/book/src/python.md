@@ -37,10 +37,13 @@ tests = ["test_counter"]
 ```
 
 ```sh
+pip install rivet-hdl
 rivet run --python --sim icarus
 ```
 
-No Rust crate and no `cargo`. The full reference — the whole API, the
+No Rust crate and no `cargo`: the wheel carries the `rivet` CLI and the
+PLI plugin as well as the bindings. The distribution is `rivet-hdl`
+because plain `rivet` was taken on PyPI; the import stays `rivet`. The full reference — the whole API, the
 cost model, the cocotb translation table and the measurements — is in
 [`docs/python.md`](https://github.com/A-Ravioli/rivet/blob/main/docs/python.md).
 

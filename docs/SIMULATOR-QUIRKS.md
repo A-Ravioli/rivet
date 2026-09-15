@@ -197,7 +197,7 @@ keeps FLI because it is faster than Questa's VHPI.
 ### The simulators CI runs
 
 ```sh
-cargo build -p rivet-cli
+cargo build -p rivet-hdl-cli
 target/debug/rivet run --sim icarus    -C examples/conformance
 target/debug/rivet run --sim verilator -C examples/conformance
 target/debug/rivet run --sim ghdl      -C examples/dff_vhdl
@@ -243,7 +243,7 @@ and launches each one (`crates/rivet-cli/src/lib.rs:457-579`, selected at
 point of this section:
 
 ```sh
-cargo build -p rivet-cli
+cargo build -p rivet-hdl-cli
 target/debug/rivet run --sim questa   -C examples/conformance
 target/debug/rivet run --sim xcelium  -C examples/conformance
 target/debug/rivet run --sim vcs      -C examples/conformance

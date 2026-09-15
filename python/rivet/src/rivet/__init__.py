@@ -51,7 +51,7 @@ except ImportError:  # pragma: no cover - exercised by the wheel, not by CI
         raise ImportError(
             "rivet's compiled bindings are missing. Inside a simulator they come "
             "from the PLI plugin; outside one, install the wheel "
-            "(`pip install rivet`) or build it with "
+            "(`pip install rivet-hdl`) or build it with "
             "`cargo build -p rivet-python-ext` and put the library on sys.path "
             "as `_rivet`."
         ) from exc

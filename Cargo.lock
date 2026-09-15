@@ -35,8 +35,8 @@ name = "example-bench"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
- "rivet-verilator",
+ "rivet-hdl",
+ "rivet-hdl-verilator",
 ]
 
 [[package]]
@@ -44,8 +44,8 @@ name = "example-bench-soc"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
- "rivet-verilator",
+ "rivet-hdl",
+ "rivet-hdl-verilator",
 ]
 
 [[package]]
@@ -53,8 +53,8 @@ name = "example-bus"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
- "rivet-verilator",
+ "rivet-hdl",
+ "rivet-hdl-verilator",
 ]
 
 [[package]]
@@ -62,8 +62,8 @@ name = "example-conformance"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
- "rivet-verilator",
+ "rivet-hdl",
+ "rivet-hdl-verilator",
 ]
 
 [[package]]
@@ -71,8 +71,8 @@ name = "example-dff"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
- "rivet-verilator",
+ "rivet-hdl",
+ "rivet-hdl-verilator",
 ]
 
 [[package]]
@@ -80,7 +80,7 @@ name = "example-dff-vhdl"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
+ "rivet-hdl",
 ]
 
 [[package]]
@@ -88,8 +88,8 @@ name = "example-fifo"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
- "rivet-verilator",
+ "rivet-hdl",
+ "rivet-hdl-verilator",
 ]
 
 [[package]]
@@ -97,7 +97,7 @@ name = "example-vhdl-types"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet",
+ "rivet-hdl",
 ]
 
 [[package]]
@@ -279,31 +279,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
-name = "rivet"
+name = "rivet-hdl"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-cli",
- "rivet-core",
- "rivet-kit",
- "rivet-macros",
- "rivet-verilator",
- "rivet-vhpi",
- "rivet-vpi",
+ "rivet-hdl-cli",
+ "rivet-hdl-core",
+ "rivet-hdl-kit",
+ "rivet-hdl-macros",
+ "rivet-hdl-verilator",
+ "rivet-hdl-vhpi",
+ "rivet-hdl-vpi",
 ]
 
 [[package]]
-name = "rivet-cli"
+name = "rivet-hdl-cli"
 version = "0.1.0"
 dependencies = [
- "rivet-core",
- "rivet-manifest",
+ "rivet-hdl-core",
+ "rivet-hdl-manifest",
  "serde_json",
  "syn 2.0.119",
 ]
 
 [[package]]
-name = "rivet-core"
+name = "rivet-hdl-core"
 version = "0.1.0"
 dependencies = [
  "inventory",
@@ -312,16 +312,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "rivet-kit"
+name = "rivet-hdl-kit"
 version = "0.1.0"
 dependencies = [
  "log",
  "pyo3",
- "rivet-core",
+ "rivet-hdl-core",
 ]
 
 [[package]]
-name = "rivet-macros"
+name = "rivet-hdl-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -330,7 +330,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rivet-manifest"
+name = "rivet-hdl-manifest"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -338,41 +338,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "rivet-mock"
+name = "rivet-hdl-mock"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-core",
- "rivet-kit",
- "rivet-macros",
+ "rivet-hdl-core",
+ "rivet-hdl-kit",
+ "rivet-hdl-macros",
  "serde_json",
 ]
 
 [[package]]
-name = "rivet-verilator"
+name = "rivet-hdl-verilator"
 version = "0.1.0"
 dependencies = [
  "cc",
  "log",
- "rivet-core",
- "rivet-manifest",
- "rivet-vpi",
+ "rivet-hdl-core",
+ "rivet-hdl-manifest",
+ "rivet-hdl-vpi",
 ]
 
 [[package]]
-name = "rivet-vhpi"
+name = "rivet-hdl-vhpi"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-core",
+ "rivet-hdl-core",
 ]
 
 [[package]]
-name = "rivet-vpi"
+name = "rivet-hdl-vpi"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-core",
+ "rivet-hdl-core",
 ]
 
 [[package]]

@@ -164,13 +164,13 @@ version = "0.1.0"
 dependencies = [
  "log",
  "pyo3",
- "rivet-core",
- "rivet-kit",
- "rivet-mock",
+ "rivet-hdl-core",
+ "rivet-hdl-kit",
+ "rivet-hdl-mock",
 ]
 
 [[package]]
-name = "rivet-core"
+name = "rivet-hdl-core"
 version = "0.1.0"
 dependencies = [
  "inventory",
@@ -179,19 +179,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "rivet-kit"
+name = "rivet-hdl-kit"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-core",
+ "rivet-hdl-core",
 ]
 
 [[package]]
-name = "rivet-mock"
+name = "rivet-hdl-mock"
 version = "0.1.0"
 dependencies = [
  "log",
- "rivet-core",
+ "rivet-hdl-core",
+]
+
+[[package]]
+name = "rivet-hdl-vhpi"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet-hdl-core",
+]
+
+[[package]]
+name = "rivet-hdl-vpi"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rivet-hdl-core",
 ]
 
 [[package]]
@@ -209,25 +225,9 @@ dependencies = [
  "log",
  "pyo3",
  "rivet-bridge",
- "rivet-core",
- "rivet-vhpi",
- "rivet-vpi",
-]
-
-[[package]]
-name = "rivet-vhpi"
-version = "0.1.0"
-dependencies = [
- "log",
- "rivet-core",
-]
-
-[[package]]
-name = "rivet-vpi"
-version = "0.1.0"
-dependencies = [
- "log",
- "rivet-core",
+ "rivet-hdl-core",
+ "rivet-hdl-vhpi",
+ "rivet-hdl-vpi",
 ]
 
 [[package]]

@@ -15,7 +15,7 @@ with `--release`.
 Reproduce with:
 
 ```sh
-cargo build --release -p rivet-cli
+cargo build --release -p rivet-hdl-cli
 RIVET_BENCH_N=100000 target/release/rivet run --sim icarus    --release -C examples/bench
 RIVET_BENCH_N=100000 target/release/rivet run --sim verilator --release -C examples/bench
 RIVET_BENCH_N=100000 python3 examples/bench/cocotb/run.py icarus
@@ -117,7 +117,7 @@ adds nothing measurable on top.
 Reproduce with:
 
 ```sh
-cargo build --release -p rivet-cli
+cargo build --release -p rivet-hdl-cli
 ci/bench.py --repeat 5 --cycles 100000 --release
 ci/bench.py --repeat 5 --cycles 100000 --release --baseline docs/bench-baseline.json
 ```

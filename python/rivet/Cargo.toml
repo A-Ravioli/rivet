@@ -15,9 +15,9 @@ publish = false
 
 [workspace.dependencies]
 pyo3 = { version = "0.23", default-features = false, features = ["macros"] }
-rivet-core = { path = "../../crates/rivet-core" }
-rivet-kit = { path = "../../crates/rivet-kit" }
-rivet-mock = { path = "../../crates/rivet-mock" }
+rivet-core = { package = "rivet-hdl-core", path = "../../crates/rivet-core" }
+rivet-kit = { package = "rivet-hdl-kit", path = "../../crates/rivet-kit" }
+rivet-mock = { package = "rivet-hdl-mock", path = "../../crates/rivet-mock" }
 rivet-bridge = { path = "crates/bridge" }
 log = { version = "0.4", features = ["std"] }
 

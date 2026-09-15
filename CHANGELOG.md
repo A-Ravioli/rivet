@@ -90,6 +90,20 @@ listed under "Changed" with the migration in one line.
 
 ### Changed
 
+- **Published names.** The crates are `rivet-hdl`, `rivet-hdl-core`,
+  `rivet-hdl-cli` and so on; the wheel is `rivet-hdl`. Plain `rivet` was
+  taken on both crates.io and PyPI. What you write is unchanged: each
+  crate keeps its old library name, so `use rivet::prelude::*` and
+  `use rivet_core::…` still compile, and the Python import is still
+  `rivet`. Depend on it as `rivet = { package = "rivet-hdl", version = … }`
+  to keep the short key, which is what `rivet new` now generates.
+- `pip install rivet-hdl` is now enough on its own: the wheel carries the
+  `rivet` CLI and the PLI plugin alongside the bindings, so a Python
+  testbench needs no cargo and no Rust toolchain. One wheel per platform
+  and Python minor version, because the plugin links libpython.
+- `rivet run` gained `--plugin` and `--python-tests`.
+- The release workflow publishes to PyPI, and to crates.io it now also
+  publishes `rivet-hdl-vhpi`, which was missing from the list.
 - `rivet-vpi` and `rivet-vhpi` gained a default `startup-table` feature.
   It is on unless turned off, so nothing changes for a test crate; the
   Python plugin turns it off because a shared object can export only one

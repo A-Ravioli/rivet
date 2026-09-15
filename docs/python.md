@@ -81,7 +81,7 @@ Shapes cocotb has no equivalent for:
 Reproduce it:
 
 ```sh
-cargo build --release -p rivet-cli
+cargo build --release -p rivet-hdl-cli
 pip install cocotb                      # for the cocotb column
 ci/bench-python.py --repeat 3 --cycles 20000
 ```
@@ -387,19 +387,53 @@ one can share a scoreboard.
 
 ## Installing
 
-From a checkout, nothing: `rivet run --python` builds the plugin the first
-time and finds the package in the tree.
+```sh
+pip install rivet-hdl
+```
 
-Otherwise:
+That is the whole thing: the `rivet` package, the bindings, the `rivet`
+CLI and the PLI plugin the simulator loads. No cargo, no Rust toolchain.
+You still bring your own simulator — Icarus, GHDL or NVC.
 
 ```sh
-pip install rivet                     # the package and the bindings
-cargo build --release -p rivet-python-plugin   # from a checkout, for the plugin
+rivet run --python --sim icarus
 ```
+
+The distribution is `rivet-hdl` because plain `rivet` on PyPI is an
+unrelated S3 library; the import stays `rivet`. The Rust crates follow the
+same split — `cargo add rivet-hdl` gives you `use rivet::`.
+
+A wheel is specific to a platform *and* a Python minor version, because
+the plugin links libpython rather than loading it. (pyo3's `abi3` does not
+change that: it narrows the API this code may use, but the build still
+links the concrete interpreter. cocotb ships per-version wheels for the
+same reason.)
+
+### From a checkout
+
+Nothing to install. `rivet run --python` builds the plugin the first time
+and finds the package in the tree:
+
+```sh
+git clone https://github.com/A-Ravioli/rivet && cd rivet
+cargo build --release -p rivet-hdl-cli
+cd ~/my-testbench && ~/rivet/target/release/rivet run --sim icarus
+```
+
+### Building a wheel yourself
+
+```sh
+cd python/rivet
+python3 build-wheel.py --out dist        # for the interpreter running it
+```
+
+It builds the CLI and the plugin, stages them in the package, and calls
+maturin. `--no-strip` keeps the debug info, which is about 30 MB larger
+and worth it when debugging a crash inside the simulator.
 
 Point `rivet run` at a plugin explicitly with `--plugin <path>` or
 `RIVET_PYTHON_PLUGIN`. For NVC, build it with `--no-default-features
 --features vhpi`: VPI and VHPI cannot share one shared object.
 
-Building the plugin needs a Python development install — `libpython` and
-its headers.
+Building any of this from source needs a Python development install —
+`libpython` and its headers.

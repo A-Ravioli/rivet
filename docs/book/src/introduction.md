@@ -144,7 +144,7 @@ day is the edit-to-result loop, which is in the
 Reproduce with:
 
 ```sh
-cargo build --release -p rivet-cli
+cargo build --release -p rivet-hdl-cli
 RIVET_BENCH_N=100000 target/release/rivet run --sim icarus    --release -C examples/bench
 RIVET_BENCH_N=100000 target/release/rivet run --sim verilator --release -C examples/bench
 RIVET_BENCH_N=100000 python3 examples/bench/cocotb/run.py icarus

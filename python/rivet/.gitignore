@@ -3,3 +3,5 @@
 /dist
 **/__pycache__/
 *.so
+# Binaries staged into the package by build-wheel.py.
+/src/rivet/_bin/

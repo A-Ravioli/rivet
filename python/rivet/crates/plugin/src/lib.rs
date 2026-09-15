@@ -7,6 +7,13 @@
 //! simulation — installs the VPI (or VHPI) backend, and replaces the
 //! default Rust entry point with one that imports the Python testbench.
 //!
+//! The interpreter is linked, not loaded, so this library is specific to
+//! one Python minor version — `ldd` shows `libpython3.11.so.1.0` and not
+//! a stable-ABI stub. pyo3's `abi3` does not change that: it narrows the
+//! API this code may use, but the build script still links the concrete
+//! interpreter it found. So the wheel that carries this needs a
+//! per-version build, exactly as cocotb's does.
+//!
 //! Build it with exactly one interface:
 //!
 //! ```sh
