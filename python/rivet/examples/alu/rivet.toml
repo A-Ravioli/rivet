@@ -1,0 +1,9 @@
+[design]
+top = "alu"
+sources = ["alu.v"]
+
+[python]
+tests = ["test_alu"]
+
+[sim.icarus]
+args = ["-g2012"]

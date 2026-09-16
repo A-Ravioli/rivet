@@ -67,6 +67,19 @@ impl PyTrigger {
         TriggerIter { trigger: Some(slf.clone()) }
     }
 
+    /// The task this trigger joins, or `None` for any other trigger.
+    ///
+    /// `with_timeout` uses it: awaiting `task.join()` with a limit should
+    /// still give back what the task returned, and a bare trigger has no
+    /// value to give.
+    #[getter]
+    fn task(&self) -> Option<crate::task::PyTask> {
+        match &self.kind {
+            TriggerKind::Join { state } => Some(crate::task::PyTask { state: state.clone() }),
+            _ => None,
+        }
+    }
+
     fn __repr__(&self) -> String {
         format!("<Trigger {}>", describe(&self.kind))
     }

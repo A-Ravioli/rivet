@@ -308,6 +308,65 @@ class Tasks(unittest.TestCase):
         self.assertEqual(outcome[1], "in time")
 
 
+    def test_with_timeout_takes_a_task_a_join_or_a_trigger(self):
+        """The three shapes a caller reaches for.
+
+        Passing `task.join()` used to fail with "'Trigger' object has no
+        attribute 'send'", because only coroutines were handled.
+        """
+        fresh()
+        out = {}
+
+        @rivet.test(timeout="10us")
+        async def t(dut):
+            clk = dut.signal("clk")
+            rivet.Clock(clk, "10ns").start()
+
+            async def work():
+                await rivet.timer("10ns")
+                return "value"
+
+            # A running task.
+            out["task"] = await rivet.with_timeout(rivet.start_soon(work()), "1us")
+            # That task's join trigger: the value must survive.
+            out["join"] = await rivet.with_timeout(rivet.start_soon(work()).join(), "1us")
+            # A plain trigger has no value, but must not raise.
+            out["trigger"] = await rivet.with_timeout(clk.rising_edge(), "1us")
+            # And one that cannot fire in time.
+            try:
+                await rivet.with_timeout(clk.rising_edge(n=10_000), "100ns")
+            except TimeoutError as e:
+                out["expired"] = str(e)
+
+        assert_passed(self, only(counter_design().run()))
+        self.assertEqual(out["task"], "value")
+        self.assertEqual(out["join"], "value", "a join trigger lost the task's return value")
+        self.assertIsNone(out["trigger"])
+        self.assertIn("timed out", out["expired"])
+
+    def test_start_soon_on_a_non_coroutine_says_what_it_wanted(self):
+        fresh()
+        out = {}
+
+        @rivet.test(timeout="10us")
+        async def t(dut):
+            async def work():
+                pass
+
+            try:
+                rivet.start_soon(work)       # the function, not a call to it
+            except TypeError as e:
+                out["error"] = str(e)
+            try:
+                rivet.start_soon(rivet.timer("1ns"))   # a trigger
+            except TypeError as e:
+                out["trigger"] = str(e)
+
+        assert_passed(self, only(counter_design().run()))
+        self.assertIn("start_soon(monitor())", out["error"])
+        self.assertIn("coroutine", out["trigger"])
+
+
 class Clocks(unittest.TestCase):
     def test_a_clock_can_be_stopped(self):
         fresh()

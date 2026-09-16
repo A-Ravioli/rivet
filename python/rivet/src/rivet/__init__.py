@@ -181,17 +181,40 @@ def test(
     return register
 
 
-async def with_timeout(coro: Awaitable[Any], duration: Any, units: Optional[str] = None) -> Any:
-    """Run ``coro`` with a simulated-time limit.
+async def with_timeout(awaitable: Any, duration: Any, units: Optional[str] = None) -> Any:
+    """Await something with a simulated-time limit.
 
-    Returns its value, or raises :class:`TimeoutError` if the limit passes
-    first. The coroutine is cancelled when it does.
+    Takes a coroutine, a :class:`Task`, or a :class:`Trigger`::
+
+        await with_timeout(drain_the_fifo(), "10us")   # a coroutine
+        await with_timeout(monitor_task, "10us")       # a running task
+        await with_timeout(clk.rising_edge(), "1us")   # a trigger
+
+    Returns the value, or raises :class:`TimeoutError` if the limit passes
+    first. A coroutine started here is cancelled on timeout; a task or
+    trigger you passed in is left alone, because you still hold it.
     """
-    task = start_soon(coro, propagate=False)
-    which = await first(task.join(), timer(duration, units))
-    if which == 1:
-        task.cancel()
-        raise TimeoutError(f"timed out after {Duration(duration, units)} of simulated time")
+    limit = timer(duration, units)
+    late = f"timed out after {Duration(duration, units)} of simulated time"
+
+    if isinstance(awaitable, Task):
+        task, started_here = awaitable, False
+    elif isinstance(awaitable, Trigger):
+        # `task.join()` is a trigger, but it still has a value to return,
+        # so recover the task rather than dropping the result on the floor.
+        joined = awaitable.task
+        if joined is None:
+            if await first(awaitable, limit) == 1:
+                raise TimeoutError(late)
+            return None
+        task, started_here = joined, False
+    else:
+        task, started_here = start_soon(awaitable, propagate=False), True
+
+    if await first(task.join(), limit) == 1:
+        if started_here:
+            task.cancel()
+        raise TimeoutError(late)
     return task.result()
 
 

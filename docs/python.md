@@ -322,6 +322,22 @@ Source: [`python/rivet`](../python/rivet). The bindings are
 `crates/bridge`, the extension module is `crates/ext`, the PLI plugin is
 `crates/plugin`, and the Python package is `src/rivet`.
 
+## Worked examples
+
+Four designs with testbenches, each a different shape, in
+[`python/rivet/examples`](../python/rivet/examples):
+
+| example | what its testbench is for |
+|---|---|
+| `counter` | the smallest complete testbench |
+| `alu` | a reference model in Python, seeded randomisation, functional coverage |
+| `fifo` | two concurrent tasks with independent stalls, checked by a scoreboard |
+| `uart` | a protocol in time rather than clock edges, decoded with `rivet.timer` |
+
+```sh
+rivet run --python --sim icarus -C python/rivet/examples/alu
+```
+
 ## Without a simulator
 
 `rivet.mock` is Rivet's own pure-Rust simulator, in process. It is how the

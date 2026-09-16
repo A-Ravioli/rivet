@@ -82,6 +82,17 @@ pub fn first(triggers: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<PyTrigger> 
 #[pyfunction]
 #[pyo3(signature = (coro, name = None, propagate = true))]
 pub fn start_soon(coro: Py<PyAny>, name: Option<String>, propagate: bool) -> PyResult<PyTask> {
+    Python::with_gil(|py| -> PyResult<()> {
+        let obj = coro.bind(py);
+        if obj.hasattr(pyo3::intern!(py, "send")).unwrap_or(false) {
+            return Ok(());
+        }
+        let what = obj.get_type().name().map(|n| n.to_string()).unwrap_or_else(|_| "that".into());
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "start_soon() takes a coroutine — call the async function, as in \
+             start_soon(monitor()), not start_soon(monitor). Got {what}."
+        )))
+    })?;
     let name = match name {
         Some(n) => n,
         None => Python::with_gil(|py| {

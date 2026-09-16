@@ -60,6 +60,13 @@ listed under "Changed" with the migration in one line.
   kit are native tasks that cost a Python testbench nothing, and
   `await clk.rising_edge(n=...)` waits many cycles for one resume.
   See `docs/python.md`; sources in `python/rivet`.
+- Worked Python examples in `python/rivet/examples`, each a different
+  shape of testbench: `counter` (the smallest complete one), `alu` (a
+  reference model in Python, seeded randomisation and a covergroup closed
+  by a directed sweep), `fifo` (a producer and a consumer as concurrent
+  tasks, checked by a scoreboard) and `uart` (a protocol measured in bit
+  periods with `rivet.timer` rather than in clock edges). All four run in
+  CI on Icarus, and the two that measure coverage are gated at 100%.
 - `rivet.mock`: Rivet's mock simulator driven from Python, so a Python
   testbench (and this bridge's own test suite) runs with no simulator
   installed.
@@ -87,6 +94,27 @@ listed under "Changed" with the migration in one line.
   composed mock backends; no simulator hosting both languages has run it.
 - The user-facing book under `docs/book`, published by CI.
 - Release workflow: crates.io publishing and cross-built binaries.
+
+### Fixed
+
+- `rivet run` deleted the coverage file it was about to read when a run
+  produced exactly one, at the path the merged file goes to — which is
+  every run with a single parameter set and no sharding. `coverage.json`
+  went missing and `--cov-threshold` could not see it. No Rust example
+  combined coverage with a single parameter set, so nothing caught it
+  until the Python `alu` example did.
+- In Python mode the CLI derived `results.xml`, `coverage.json` and the
+  log directory from a relative manifest path, so they landed relative to
+  wherever the simulator happened to run. Harmless on Icarus, wrong on
+  Verilator and the commercial launchers, which set their own working
+  directory. `cargo metadata` always reports an absolute path, so the Rust
+  path never had this.
+- `rivet.with_timeout` now takes a `Task` or a `Trigger` as well as a
+  coroutine. `with_timeout(task.join(), ...)` used to fail with
+  `'Trigger' object has no attribute 'send'`, and a join trigger now keeps
+  the task's return value instead of losing it.
+- `rivet.start_soon` on something that is not a coroutine says so, instead
+  of failing later inside the driver.
 
 ### Changed
 

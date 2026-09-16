@@ -268,11 +268,19 @@ impl Package {
     /// `results.xml`, the golden directory — works off that directory
     /// exactly as it does for a Rust crate.
     fn for_python(m: &Manifest) -> Package {
+        // Absolute, as `cargo metadata` reports it for a Rust crate.
+        // Everything downstream is derived from this -- `results.xml`,
+        // `coverage.json`, the log directory -- and the simulator does not
+        // necessarily run in the directory `rivet` was invoked from:
+        // Verilator and the commercial launchers set their own. A relative
+        // path here writes those files somewhere else, or nowhere.
+        let dir = std::fs::canonicalize(&m.dir)
+            .unwrap_or_else(|_| std::env::current_dir().map(|c| c.join(&m.dir)).unwrap_or_else(|_| m.dir.clone()));
         Package {
             name: m.design.top.clone(),
             lib_name: "rivet_python".to_string(),
-            manifest_dir: m.dir.clone(),
-            target_dir: m.dir.join("sim_build"),
+            target_dir: dir.join("sim_build"),
+            manifest_dir: dir,
             verilator_bin: None,
         }
     }
@@ -1451,14 +1459,21 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
     if failures > 0 {
         code = ExitCode::from(1);
     }
-    let _ = std::fs::remove_file(out_base.join("coverage.json"));
+    let merged = out_base.join("coverage.json");
+    // One run, one parameter set, no sharding: the coverage file the
+    // simulator wrote already *is* the merged path. Clearing a stale file
+    // from an earlier run then means deleting the one about to be read, so
+    // only clear it when this run is going to write a different one.
+    let already_merged = cov_files.len() == 1 && cov_files[0] == merged;
+    if !already_merged {
+        let _ = std::fs::remove_file(&merged);
+    }
     if !cov_files.is_empty() {
         let mut report = cov::Report::default();
         for f in &cov_files {
             report.merge_file(f)?;
         }
-        let merged = out_base.join("coverage.json");
-        if cov_files.len() > 1 || cov_files[0] != merged {
+        if !already_merged {
             std::fs::write(&merged, report.to_json()).map_err(|e| e.to_string())?;
             eprintln!("rivet: merged coverage");
             eprint!("{}", report.render());

@@ -221,8 +221,23 @@ jobs:
           cd tests && python -m unittest discover -v
       - name: Build the CLI
         run: cargo build -p rivet-hdl-cli
-      - name: The counter example on Icarus, through the plugin
-        run: target/debug/rivet run --python --sim icarus -C python/rivet/examples/counter
+      - name: Every example on Icarus, through the plugin
+        run: |
+          set -eu
+          for e in counter alu fifo uart; do
+            echo "::group::$e"
+            target/debug/rivet run --python --sim icarus -C "python/rivet/examples/$e"
+            echo "::endgroup::"
+          done
+      - name: The examples that measure coverage reach 100%
+        # Also guards the merge step: with one parameter set and no
+        # sharding the coverage file the simulator writes *is* the merged
+        # path, which the CLI used to delete before reading it.
+        run: |
+          set -eu
+          for e in alu fifo; do
+            target/debug/rivet run --python --sim icarus -C "python/rivet/examples/$e" --cov-threshold 100
+          done
       - name: A failing test is reported as failing
         run: |
           cp ci/fixtures/test_python_failure.py python/rivet/examples/counter/
