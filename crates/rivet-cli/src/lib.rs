@@ -71,6 +71,14 @@ pub struct Opts {
     pub manifest: Option<PathBuf>,
     /// `rivet new --path <dir>`: depend on a Rivet checkout, not crates.io.
     pub rivet_path: Option<PathBuf>,
+    /// The testbench is Python: load the prebuilt Python plugin instead of
+    /// building a Rust crate. Implied by a `[python]` section in
+    /// `rivet.toml`.
+    pub python: bool,
+    /// An explicit Python plugin library, overriding the search.
+    pub plugin: Option<PathBuf>,
+    /// Import these modules instead of the manifest's `[python] tests`.
+    pub python_tests: Option<Vec<String>>,
 }
 
 impl Opts {
@@ -107,6 +115,9 @@ impl Opts {
             out: None,
             manifest: std::env::var("RIVET_MANIFEST").ok().filter(|s| !s.is_empty()).map(PathBuf::from),
             rivet_path: None,
+            python: false,
+            plugin: std::env::var("RIVET_PYTHON_PLUGIN").ok().filter(|s| !s.is_empty()).map(PathBuf::from),
+            python_tests: None,
         }
     }
 }
@@ -116,6 +127,9 @@ pub fn usage() -> ! {
         "usage: rivet <new|run|build|watch|bindgen|cov|clean> [options] [-- sim args]\n\
          \n\
          options:\n\
+         \x20 --python                   the testbench is Python (implied by [python] in rivet.toml)\n\
+         \x20 --plugin <path>            an explicit Python plugin library\n\
+         \x20 --python-tests <a,b>       import these modules instead of [python] tests\n\
          \x20 --sim <name>               icarus (default), verilator, ghdl, nvc;\n\
          \x20                            questa, xcelium, vcs, riviera, dsim (unverified)\n\
          \x20 -p, --package <name>       test crate (default: crate in the current directory)\n\
@@ -198,6 +212,17 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Opts {
             "-o" | "--out" => o.out = it.next().map(PathBuf::from),
             "--manifest" => o.manifest = it.next().map(PathBuf::from),
             "--path" => o.rivet_path = it.next().map(PathBuf::from),
+            "--python" => o.python = true,
+            "--python-tests" => {
+                o.python_tests = it
+                    .next()
+                    .map(|v| v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect());
+                o.python = true;
+            }
+            "--plugin" => {
+                o.plugin = it.next().map(PathBuf::from);
+                o.python = true;
+            }
             "-v" | "--verbose" => o.verbose = true,
             "-h" | "--help" => usage(),
             "--" => {
@@ -232,6 +257,187 @@ struct Package {
     manifest_dir: PathBuf,
     target_dir: PathBuf,
     verilator_bin: Option<String>,
+}
+
+impl Package {
+    /// The stand-in for a cargo package when the testbench is Python.
+    ///
+    /// There is no crate to build: the harness is a prebuilt plugin that
+    /// embeds an interpreter, and the "package" is the directory holding
+    /// `rivet.toml`. Everything downstream — the build lock, `sim_build`,
+    /// `results.xml`, the golden directory — works off that directory
+    /// exactly as it does for a Rust crate.
+    fn for_python(m: &Manifest) -> Package {
+        // Absolute, as `cargo metadata` reports it for a Rust crate.
+        // Everything downstream is derived from this -- `results.xml`,
+        // `coverage.json`, the log directory -- and the simulator does not
+        // necessarily run in the directory `rivet` was invoked from:
+        // Verilator and the commercial launchers set their own. A relative
+        // path here writes those files somewhere else, or nowhere.
+        let dir = std::fs::canonicalize(&m.dir)
+            .unwrap_or_else(|_| std::env::current_dir().map(|c| c.join(&m.dir)).unwrap_or_else(|_| m.dir.clone()));
+        Package {
+            name: m.design.top.clone(),
+            lib_name: "rivet_python".to_string(),
+            target_dir: dir.join("sim_build"),
+            manifest_dir: dir,
+            verilator_bin: None,
+        }
+    }
+}
+
+/// Find the manifest and the package for this run.
+///
+/// Python mode is used when asked for, and otherwise whenever the
+/// manifest has a `[python]` section and there is no crate to build —
+/// which is the case a Python user is in.
+fn resolve_package(opts: &Opts) -> Result<(Package, Manifest, bool), String> {
+    let find_manifest = || -> Result<Manifest, String> {
+        match &opts.manifest {
+            Some(p) => Manifest::load(p),
+            None => Manifest::find(&opts.dir),
+        }
+    };
+    if opts.python {
+        let m = find_manifest()?;
+        return Ok((Package::for_python(&m), m, true));
+    }
+    match cargo_metadata(&opts.dir, opts.package.as_deref()) {
+        Ok(pkg) => {
+            let m = load_manifest(&pkg, opts)?;
+            Ok((pkg, m, false))
+        }
+        Err(crate_err) => {
+            // No crate here. If the manifest describes a Python
+            // testbench, that is what the user meant.
+            match find_manifest() {
+                Ok(m) if m.python.is_some() => Ok((Package::for_python(&m), m, true)),
+                _ => Err(crate_err),
+            }
+        }
+    }
+}
+
+/// Where the Python plugin library is.
+///
+/// In order: `--plugin` or `RIVET_PYTHON_PLUGIN`; next to the `rivet`
+/// binary; a Rivet checkout, building it if it is not built yet; the
+/// installed `rivet` Python package.
+fn python_plugin(opts: &Opts) -> Result<PathBuf, String> {
+    let vhpi = matches!(opts.sim.as_str(), "nvc");
+    if let Some(p) = &opts.plugin {
+        if p.exists() {
+            return Ok(p.clone());
+        }
+        return Err(format!("no Python plugin at {}", p.display()));
+    }
+    let file = cdylib_file("rivet_python");
+    let mut tried = Vec::new();
+
+    // Next to the rivet binary, which is how a release tarball ships it.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let c = dir.join(&file);
+            if c.exists() && !vhpi {
+                return Ok(c);
+            }
+            tried.push(c);
+        }
+    }
+
+    // A checkout: build it if it is missing or out of date. `cargo` is
+    // cheap to ask and does nothing when the library is current.
+    if let Some(root) = checkout_root() {
+        let ws = root.join("python").join("rivet");
+        if ws.join("Cargo.toml").exists() {
+            return build_python_plugin(&ws, opts, vhpi);
+        }
+        tried.push(ws.join("Cargo.toml"));
+    }
+
+    // An installed wheel carries the plugin in the package's `_bin`
+    // directory, beside the `rivet` binary this may well be.
+    if let Some(dir) = installed_rivet_package() {
+        for c in [dir.join("_bin").join(&file), dir.join(&file)] {
+            if c.exists() && !vhpi {
+                return Ok(c);
+            }
+            tried.push(c);
+        }
+    }
+
+    Err(format!(
+        "cannot find the Python plugin ({file}). Looked in:\n{}\n\
+         Build it from a checkout with `cargo build --release -p rivet-python-plugin` \
+         (add `--no-default-features --features vhpi` for NVC), or point at it with \
+         --plugin or RIVET_PYTHON_PLUGIN.",
+        tried.iter().map(|p| format!("  {}", p.display())).collect::<Vec<_>>().join("\n")
+    ))
+}
+
+/// The root of a Rivet checkout, found from this executable
+/// (`<root>/target/<profile>/rivet`) or from the working directory.
+fn checkout_root() -> Option<PathBuf> {
+    let looks_right = |p: &Path| p.join("crates").join("rivet-core").is_dir() && p.join("python").is_dir();
+    if let Ok(exe) = std::env::current_exe() {
+        let mut d = exe.parent();
+        while let Some(p) = d {
+            if looks_right(p) {
+                return Some(p.to_path_buf());
+            }
+            d = p.parent();
+        }
+    }
+    let mut d = std::env::current_dir().ok();
+    while let Some(p) = d {
+        if looks_right(&p) {
+            return Some(p);
+        }
+        d = p.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
+/// Build the plugin from a checkout and return the library.
+fn build_python_plugin(ws: &Path, opts: &Opts, vhpi: bool) -> Result<PathBuf, String> {
+    // VPI and VHPI cannot share a library, so they do not share a target
+    // directory either.
+    let target = ws.join("target").join(if vhpi { "vhpi" } else { "vpi" });
+    let profile = if opts.release { "release" } else { "debug" };
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build").arg("-p").arg("rivet-python-plugin");
+    if opts.release {
+        cmd.arg("--release");
+    }
+    if vhpi {
+        cmd.args(["--no-default-features", "--features", "vhpi"]);
+    }
+    cmd.current_dir(ws).env("CARGO_TARGET_DIR", &target);
+    if !opts.verbose {
+        cmd.stdout(Stdio::null());
+    }
+    run_cmd(cmd, opts.verbose).map_err(|e| {
+        format!("{e}\nbuilding the Python plugin needs a Python development install (libpython and its headers)")
+    })?;
+    let so = target.join(profile).join(cdylib_file("rivet_python"));
+    if !so.exists() {
+        return Err(format!("the plugin build produced no {}", so.display()));
+    }
+    Ok(so)
+}
+
+/// The directory of an installed `rivet` Python package, if there is one.
+fn installed_rivet_package() -> Option<PathBuf> {
+    let out = Command::new("python3")
+        .args(["-c", "import rivet, os; print(os.path.dirname(rivet.__file__))"])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    p.is_dir().then_some(p)
 }
 
 fn cargo_metadata(dir: &Path, package: Option<&str>) -> Result<Package, String> {
@@ -716,6 +922,25 @@ fn common_env(cmd: &mut Command, opts: &Opts, m: &Manifest, pkg: &Package, sim_d
     cmd.env("RIVET_COVERAGE_FILE", run_dir.join("coverage.json"));
     cmd.env("RIVET_TOPLEVEL", &m.design.top);
     cmd.env("RIVET_GOLDEN_DIR", pkg.manifest_dir.join("golden"));
+    if let Some(py) = &m.python {
+        let tests = opts.python_tests.as_ref().unwrap_or(&py.tests);
+        cmd.env("RIVET_PYTHON_TESTS", tests.join(","));
+        // The manifest's directory first, then whatever it adds, so a
+        // testbench sitting beside `rivet.toml` needs no configuration.
+        let mut paths = vec![m.dir.clone()];
+        paths.extend(py.paths.iter().map(|p| m.dir.join(p)));
+        // Working from a checkout, the `rivet` package is in the tree
+        // rather than installed. Put it last, so it is found only if
+        // nothing earlier on the path provides it.
+        if let Some(root) = checkout_root() {
+            let src = root.join("python").join("rivet").join("src");
+            if src.join("rivet").join("__init__.py").exists() {
+                paths.push(src);
+            }
+        }
+        let joined = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(":");
+        cmd.env("RIVET_PYTHON_PATH", joined);
+    }
     if let Some(s) = &opts.param_set {
         cmd.env("RIVET_PARAM_SET", s);
     }
@@ -849,26 +1074,45 @@ fn cdylib_file(lib_name: &str) -> String {
 fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Option<&str>) -> Result<Launch, String> {
     std::fs::create_dir_all(sim_dir).map_err(|e| e.to_string())?;
     let profile = if opts.release { "release" } else { "debug" };
+    // A Python testbench has no crate to build: the harness is a prebuilt
+    // plugin that embeds an interpreter.
+    let harness = |verilator: bool| -> Result<PathBuf, String> {
+        if opts.python {
+            return python_plugin(opts);
+        }
+        cargo_build(pkg, opts, verilator, set)?;
+        Ok(pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name)))
+    };
     match opts.sim.as_str() {
         "icarus" => {
-            cargo_build(pkg, opts, false, set)?;
+            let so = harness(false)?;
             let vvp = build_icarus(m, opts, sim_dir, set)?;
-            let so = pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name));
             let plugin = sim_dir.join(format!("{}.vpi", pkg.lib_name));
             std::fs::copy(&so, &plugin).map_err(|e| format!("cannot copy {}: {e}", so.display()))?;
             Ok(Launch::Icarus { vvp, plugin_dir: sim_dir.to_path_buf(), lib_name: pkg.lib_name.clone() })
         }
         "ghdl" => {
-            cargo_build(pkg, opts, false, set)?;
+            let so = harness(false)?;
             build_ghdl(m, opts, sim_dir)?;
-            Ok(Launch::Ghdl { so: pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name)) })
+            Ok(Launch::Ghdl { so })
         }
         "nvc" => {
-            cargo_build_features(pkg, opts, &["vhpi"], true, set)?;
+            let so = if opts.python {
+                python_plugin(opts)?
+            } else {
+                cargo_build_features(pkg, opts, &["vhpi"], true, set)?;
+                pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name))
+            };
             build_nvc(m, opts, sim_dir)?;
-            Ok(Launch::Nvc { so: pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name)) })
+            Ok(Launch::Nvc { so })
         }
         "verilator" => {
+            if opts.python {
+                // Verilator has no PLI to load a plugin through: the
+                // harness is a binary that links the verilated model, so
+                // it has to be compiled against the design.
+                return Err("--python does not support Verilator yet; use icarus, ghdl or nvc".to_string());
+            }
             cargo_build(pkg, opts, true, set)?;
             Ok(Launch::Verilator { bin: pkg.target_dir.join(profile).join(pkg.verilator_bin.as_ref().unwrap()) })
         }
@@ -876,8 +1120,7 @@ fn build_one(pkg: &Package, m: &Manifest, opts: &Opts, sim_dir: &Path, set: Opti
         // behaviour from docs/SIMULATOR-QUIRKS.md. A licence holder running
         // examples/conformance is what turns these from code into support.
         "questa" | "xcelium" | "vcs" | "riviera" | "dsim" => {
-            cargo_build(pkg, opts, false, set)?;
-            let so = pkg.target_dir.join(profile).join(cdylib_file(&pkg.lib_name));
+            let so = harness(false)?;
             build_commercial(m, opts, sim_dir, &so)
         }
         other => Err(format!(
@@ -1072,8 +1315,18 @@ impl Drop for BuildLock {
 }
 
 pub fn run(opts: &Opts) -> Result<ExitCode, String> {
-    let pkg = cargo_metadata(&opts.dir, opts.package.as_deref())?;
-    let m = load_manifest(&pkg, opts)?;
+    let (pkg, m, python) = resolve_package(opts)?;
+    let mut opts = opts.clone();
+    opts.python = python;
+    let opts = &opts;
+    let no_tests = opts.python_tests.as_ref().map(|t| t.is_empty()).unwrap_or(true)
+        && m.python.as_ref().map(|p| p.tests.is_empty()).unwrap_or(true);
+    if python && no_tests {
+        return Err(format!(
+            "no Python test modules to import: add `tests = [\"test_something\"]` under [python] in {}",
+            m.dir.join("rivet.toml").display()
+        ));
+    }
     let base_dir = pkg.manifest_dir.join("sim_build").join(&opts.sim);
     std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
     // Where this run's results land. The build stays in `base_dir` so
@@ -1206,14 +1459,21 @@ pub fn run(opts: &Opts) -> Result<ExitCode, String> {
     if failures > 0 {
         code = ExitCode::from(1);
     }
-    let _ = std::fs::remove_file(out_base.join("coverage.json"));
+    let merged = out_base.join("coverage.json");
+    // One run, one parameter set, no sharding: the coverage file the
+    // simulator wrote already *is* the merged path. Clearing a stale file
+    // from an earlier run then means deleting the one about to be read, so
+    // only clear it when this run is going to write a different one.
+    let already_merged = cov_files.len() == 1 && cov_files[0] == merged;
+    if !already_merged {
+        let _ = std::fs::remove_file(&merged);
+    }
     if !cov_files.is_empty() {
         let mut report = cov::Report::default();
         for f in &cov_files {
             report.merge_file(f)?;
         }
-        let merged = out_base.join("coverage.json");
-        if cov_files.len() > 1 || cov_files[0] != merged {
+        if !already_merged {
             std::fs::write(&merged, report.to_json()).map_err(|e| e.to_string())?;
             eprintln!("rivet: merged coverage");
             eprint!("{}", report.render());

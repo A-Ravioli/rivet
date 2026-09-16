@@ -8,6 +8,7 @@ What is tested, where, and what the suites found.
 |---|---|---|---|
 | Values (`LogicVec`, `Logic`), time units and rounding, Fx hash, result selection and XML escaping, seeded random (`Rng`, ranges, weights, per-test streams), functional coverage (bins, ignore/illegal, crosses, JSON), JSON log records and per-test log files | `crates/rivet-core/src/*.rs` unit tests | nothing | 36 |
 | Manifest parsing, parameter sets | `crates/rivet-manifest` | nothing | 2 |
+| Every cargo workspace resolves, including the two under `python/` that the root workspace does not contain | `ci/check-workspaces.py` | nothing | 3 |
 | `#[rivet::test]` attribute parsing (`timeout`, `wall_timeout`, `params`, `param_sets`) | `crates/rivet-macros` | nothing | 1 |
 | Bindgen code generation (parsed back with `syn`, typedef enums and packed structs, two-dimensional array binders, Icarus-internal scopes skipped), SystemVerilog typedef parsing and literal evaluation, coverage merging and rendering, watch fingerprints, results.json round trip, sharding, libtest-style selection, argument parsing, the `rivet new` scaffold | `crates/rivet-cli/src/*.rs` unit tests | nothing | 16 |
 | VHPI decoding: quoted literals, an enumeration classified by its literals (so `std_logic`, `bit`, `boolean` and `character` are told apart), VHPI time round trip | `crates/rivet-vhpi/src/lib.rs` unit tests | nothing | 3 |
@@ -34,6 +35,8 @@ What is tested, where, and what the suites found.
 | VHDL types: a record port, an enumeration and its literal names, a boolean, an integer, an unconstrained generic, a for-generate region | `examples/vhdl_types` | NVC (VHPI) or GHDL (VPI) | 6 tests: 5 pass and 1 skips on NVC, 2 pass and 4 skip on GHDL |
 | FuseSoC and Edalize: the `rivet` tool backend generates `rivet.toml` from a core file and runs the dff example | `integrations/edalize`, `examples/dff/rivet-dff.core` | Icarus, Python | 1 flow |
 | `rivet_py`: memory, RNG (bit-identical to Rust), scoreboard and coverage from Python; a cocotb test using them | `python/rivet_py/tests` | Python, cocotb, Icarus | 4 + 1 |
+| The Python API against the mock simulator: the coroutine driver, every trigger, batched edges, phases and the write-visibility rule, tasks (start, join, cancel, exceptions, `with_timeout`), clocks and their options, values (round trips, 512-bit, negative, X/Z, slices, force/release, string forms), hierarchy lookup and its errors, registration, stages, filters, skip, `expect_fail`, `expect_fail_msg`, timeouts, seeds, and the kit from Python | `python/rivet/tests` | Python (no simulator) | 55 |
+| A Python testbench end to end through the PLI plugin: the counter example on Icarus, and a deliberately failing test whose Python traceback reaches the summary and `results.xml` with a non-zero exit | `python/rivet/examples/counter`, `ci/fixtures/test_python_failure.py` | Python, Icarus | 4 + 1 |
 
 The skip on NVC and one of the four on GHDL is `list_children`, a hierarchy
 dump that only runs with `RIVET_LIST_CHILDREN=1`. The other three GHDL skips
@@ -56,6 +59,12 @@ for s in ghdl nvc; do
 done
 pip install -e integrations/edalize && fusesoc --cores-root examples/dff run --no-export --tool rivet rivet:examples:dff
 (cd python/rivet_py && maturin build --release -o dist && pip install dist/*.whl && cd tests && python -m unittest test_shim && cd cocotb_dff && python run.py)
+
+# The Python layer: its own suite needs nothing, the example needs Icarus.
+(cd python/rivet && cargo build -p rivet-python-ext \
+   && mkdir -p build && cp target/debug/lib_rivet.so build/_rivet.so \
+   && cd tests && python3 -m unittest discover)
+target/debug/rivet run --python --sim icarus -C python/rivet/examples/counter
 ```
 
 Every run prints a `RIVET_RESULT` line with the counts above, so a claim in

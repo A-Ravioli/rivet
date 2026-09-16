@@ -29,7 +29,7 @@ fn write(root: &Path, rel: &str, body: &str) -> Result<(), String> {
 /// Create a new testbench crate at `dir/name`.
 ///
 /// `rivet_path` makes the generated manifest depend on a local checkout
-/// (`rivet = { path = ... }`) instead of the published crate.
+/// (`rivet = { path = ... }`) instead of the published `rivet-hdl`.
 pub fn scaffold(name: &str, dir: &Path, rivet_path: Option<&Path>) -> Result<PathBuf, String> {
     let root = if name == "." { dir.to_path_buf() } else { dir.join(name) };
     let crate_name =
@@ -39,15 +39,24 @@ pub fn scaffold(name: &str, dir: &Path, rivet_path: Option<&Path>) -> Result<Pat
     }
     std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
 
+    // The crates are `rivet-hdl*` on crates.io, but the dependency keeps
+    // the key `rivet` so the testbench says `use rivet::prelude::*` and
+    // the feature table says `rivet/vpi`.
     let dep = |extra: &str| -> String {
         match rivet_path {
-            Some(p) => format!("{{ path = {:?}{extra} }}", p.join("crates/rivet").display().to_string()),
-            None => format!("{{ version = \"0.1\"{extra} }}"),
+            Some(p) => format!(
+                "{{ package = \"rivet-hdl\", path = {:?}{extra} }}",
+                p.join("crates/rivet").display().to_string()
+            ),
+            None => format!("{{ package = \"rivet-hdl\", version = \"0.1\"{extra} }}"),
         }
     };
     let dep_verilator = match rivet_path {
-        Some(p) => format!("{{ path = {:?} }}", p.join("crates/rivet-verilator").display().to_string()),
-        None => "{ version = \"0.1\" }".to_string(),
+        Some(p) => format!(
+            "{{ package = \"rivet-hdl-verilator\", path = {:?} }}",
+            p.join("crates/rivet-verilator").display().to_string()
+        ),
+        None => "{ package = \"rivet-hdl-verilator\", version = \"0.1\" }".to_string(),
     };
 
     write(

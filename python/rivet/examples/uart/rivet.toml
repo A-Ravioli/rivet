@@ -1,0 +1,9 @@
+[design]
+top = "uart"
+sources = ["uart.v"]
+
+[python]
+tests = ["test_uart"]
+
+[sim.icarus]
+args = ["-g2012"]

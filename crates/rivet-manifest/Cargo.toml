@@ -1,5 +1,5 @@
 [package]
-name = "rivet-manifest"
+name = "rivet-hdl-manifest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,11 @@ rust-version.workspace = true
 categories.workspace = true
 keywords.workspace = true
 readme = "README.md"
+
+# The package is `rivet-hdl-manifest` on crates.io; the library keeps its
+# short name, so testbenches say `rivet_manifest` as they always have.
+[lib]
+name = "rivet_manifest"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

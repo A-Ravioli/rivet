@@ -1,0 +1,9 @@
+[design]
+top = "counter"
+sources = ["counter.v"]
+
+[python]
+tests = ["test_counter"]
+
+[sim.icarus]
+args = ["-g2012"]

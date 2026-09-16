@@ -1,0 +1,25 @@
+[package]
+name = "rivet-python-ext"
+description = "The `_rivet` extension module: Rivet's Python API, with the mock simulator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "_rivet"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true }
+rivet-bridge = { workspace = true }
+
+[features]
+default = []
+# For a redistributable wheel: pyo3 stops linking libpython and lets the
+# host interpreter resolve the symbols. Build this target on its own
+# (`cargo build -p rivet-python-ext --features wheel`), never alongside
+# the plugin, which needs libpython linked.
+wheel = ["pyo3/extension-module"]

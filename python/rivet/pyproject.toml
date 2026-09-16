@@ -1,0 +1,46 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+# The distribution is `rivet-hdl` (plain `rivet` on PyPI is an unrelated
+# S3 library); the import stays `rivet`, matching `cargo add rivet-hdl`
+# giving you `use rivet::`.
+name = "rivet-hdl"
+version = "0.1.0"
+description = "Hardware testbenches in Python, on a native scheduler"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+keywords = ["hdl", "verilog", "vhdl", "verification", "cocotb", "simulation"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+
+[project.scripts]
+# The Rust CLI, carried in the wheel: `pip install rivet-hdl` is enough to
+# run `rivet run --python`, with no cargo and no Rust toolchain.
+rivet = "rivet._cli:main"
+
+[project.urls]
+Homepage = "https://github.com/A-Ravioli/rivet"
+Documentation = "https://github.com/A-Ravioli/rivet/blob/main/docs/python.md"
+Repository = "https://github.com/A-Ravioli/rivet"
+
+[tool.maturin]
+# The extension module, built as `rivet._rivet`. Inside a simulator this
+# copy is not used: the PLI plugin puts an identical `_rivet` in the
+# interpreter's inittab before anything can import it.
+manifest-path = "crates/ext/Cargo.toml"
+module-name = "rivet._rivet"
+python-source = "src"
+features = ["wheel"]
+# Same reasoning as the binaries `build-wheel.py` stages: debug info is
+# for a checkout, not for a wheel.
+strip = true
+# The CLI and the PLI plugin, staged into src/rivet/_bin by
+# `build-wheel.py`. They are compiled binaries, so a wheel built without
+# that step is missing them and says so when you run it.
+include = [{ path = "src/rivet/_bin/*", format = "wheel" }]

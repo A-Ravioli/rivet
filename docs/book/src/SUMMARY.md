@@ -10,4 +10,5 @@
 - [Random stimulus and coverage](random-and-coverage.md)
 - [Debugging](debugging.md)
 - [CLI reference](cli.md)
+- [Testbenches in Python](python.md)
 - [Migrating from cocotb](migration.md)

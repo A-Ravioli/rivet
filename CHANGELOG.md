@@ -48,6 +48,31 @@ listed under "Changed" with the migration in one line.
 
 ### Added
 
+- **Testbenches in Python.** `@rivet.test` on an `async def`, driven by
+  Rivet's own executor rather than an interpreter-owned scheduler: a
+  trigger is a simulator callback and a coroutine is one more task on the
+  executor, entered once per `await`. `rivet run --python` needs no crate
+  and no `cargo`; a `[python]` section in `rivet.toml` names the modules to
+  import. Measured against cocotb 2.1 on the same design, simulator and
+  machine: 7.8x on an edge per cycle, 32.3x on per-cycle value traffic,
+  3.5x with a hundred tasks awaiting every edge — and 1.3x-1.6x slower than
+  the Rust API, which is the honest cost of the interpreter. Clocks and the
+  kit are native tasks that cost a Python testbench nothing, and
+  `await clk.rising_edge(n=...)` waits many cycles for one resume.
+  See `docs/python.md`; sources in `python/rivet`.
+- Worked Python examples in `python/rivet/examples`, each a different
+  shape of testbench: `counter` (the smallest complete one), `alu` (a
+  reference model in Python, seeded randomisation and a covergroup closed
+  by a directed sweep), `fifo` (a producer and a consumer as concurrent
+  tasks, checked by a scoreboard) and `uart` (a protocol measured in bit
+  periods with `rivet.timer` rather than in clock edges). All four run in
+  CI on Icarus, and the two that measure coverage are gated at 100%.
+- `rivet.mock`: Rivet's mock simulator driven from Python, so a Python
+  testbench (and this bridge's own test suite) runs with no simulator
+  installed.
+- `rivet-core::test::TestSpec` and `run_regression_specs`, so tests
+  discovered at run time go through the same regression loop, seeding,
+  timeouts and `results.xml` as `#[rivet::test]`.
 - VHPI backend (`rivet-vhpi`) and the `nvc` simulator flow, so VHDL designs
   run on NVC as well as on GHDL through VPI.
 - `rivet new` scaffolds a testbench crate that runs without further edits.
@@ -70,8 +95,47 @@ listed under "Changed" with the migration in one line.
 - The user-facing book under `docs/book`, published by CI.
 - Release workflow: crates.io publishing and cross-built binaries.
 
+### Fixed
+
+- `rivet run` deleted the coverage file it was about to read when a run
+  produced exactly one, at the path the merged file goes to — which is
+  every run with a single parameter set and no sharding. `coverage.json`
+  went missing and `--cov-threshold` could not see it. No Rust example
+  combined coverage with a single parameter set, so nothing caught it
+  until the Python `alu` example did.
+- In Python mode the CLI derived `results.xml`, `coverage.json` and the
+  log directory from a relative manifest path, so they landed relative to
+  wherever the simulator happened to run. Harmless on Icarus, wrong on
+  Verilator and the commercial launchers, which set their own working
+  directory. `cargo metadata` always reports an absolute path, so the Rust
+  path never had this.
+- `rivet.with_timeout` now takes a `Task` or a `Trigger` as well as a
+  coroutine. `with_timeout(task.join(), ...)` used to fail with
+  `'Trigger' object has no attribute 'send'`, and a join trigger now keeps
+  the task's return value instead of losing it.
+- `rivet.start_soon` on something that is not a coroutine says so, instead
+  of failing later inside the driver.
+
 ### Changed
 
+- **Published names.** The crates are `rivet-hdl`, `rivet-hdl-core`,
+  `rivet-hdl-cli` and so on; the wheel is `rivet-hdl`. Plain `rivet` was
+  taken on both crates.io and PyPI. What you write is unchanged: each
+  crate keeps its old library name, so `use rivet::prelude::*` and
+  `use rivet_core::…` still compile, and the Python import is still
+  `rivet`. Depend on it as `rivet = { package = "rivet-hdl", version = … }`
+  to keep the short key, which is what `rivet new` now generates.
+- `pip install rivet-hdl` is now enough on its own: the wheel carries the
+  `rivet` CLI and the PLI plugin alongside the bindings, so a Python
+  testbench needs no cargo and no Rust toolchain. One wheel per platform
+  and Python minor version, because the plugin links libpython.
+- `rivet run` gained `--plugin` and `--python-tests`.
+- The release workflow publishes to PyPI, and to crates.io it now also
+  publishes `rivet-hdl-vhpi`, which was missing from the list.
+- `rivet-vpi` and `rivet-vhpi` gained a default `startup-table` feature.
+  It is on unless turned off, so nothing changes for a test crate; the
+  Python plugin turns it off because a shared object can export only one
+  PLI startup table and it exports its own.
 - Minimum supported Rust version is 1.87, checked in CI.
 - `ObjKind`, `Error`, `BackendError`, `Outcome` and `Phase` are
   `#[non_exhaustive]`; match them with a wildcard arm.

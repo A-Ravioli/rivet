@@ -4,3 +4,10 @@ sources = ["hdl/bench.sv"]
 
 [sim.icarus]
 args = ["-g2012"]
+
+# The same benchmarks as a Python testbench, for the three-way comparison
+# in docs/python.md. Run with `rivet run --python`; without that flag the
+# Rust crate in this directory is what runs.
+[python]
+tests = ["test_bench"]
+paths = ["python"]

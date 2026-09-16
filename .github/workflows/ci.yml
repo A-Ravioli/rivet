@@ -24,7 +24,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: dff example on Icarus
         run: target/debug/rivet run --sim icarus -C examples/dff
       - name: dff example on Verilator
@@ -83,7 +83,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Kit tests with an embedded interpreter
-        run: cargo test -p rivet-kit --features python
+        run: cargo test -p rivet-hdl-kit --features python
 
   macos:
     name: macOS
@@ -96,7 +96,7 @@ jobs:
       - name: Unit and mock-simulator tests
         run: cargo test --workspace --no-fail-fast
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: dff example on Icarus
         run: target/debug/rivet run --sim icarus -C examples/dff
       - name: fifo example on Icarus
@@ -137,12 +137,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Metadata crates.io requires
         run: python3 ci/check-package-metadata.py
+      - name: Every workspace still resolves
+        # The two under python/ are outside the root workspace, so
+        # `cargo test --workspace` never checks them.
+        run: python3 ci/check-workspaces.py
       - name: Package the crates with no internal dependencies
         # The rest cannot be packaged until their path dependencies exist in
         # the registry, which happens during the first release.
         run: |
           set -eu
-          for c in rivet-core rivet-macros rivet-manifest; do
+          for c in rivet-hdl-core rivet-hdl-macros rivet-hdl-manifest; do
             cargo package -p "$c" --no-verify
           done
 
@@ -174,7 +178,7 @@ jobs:
           make -j"$(nproc)"
           sudo make install
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: VHDL examples on NVC
         run: |
           export PATH=/opt/nvc/bin:$PATH
@@ -185,6 +189,85 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends ghdl
           target/debug/rivet run --sim ghdl -C examples/vhdl_types
+
+  python-testbenches:
+    name: Python testbenches
+    # The Python API: its own suite against the in-process mock simulator,
+    # then the same testbench on a real one through the PLI plugin.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Icarus and the Python build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends iverilog python3-dev
+          pip install maturin
+      - name: Lint and format
+        working-directory: python/rivet
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+      - name: Unit tests against the mock simulator
+        working-directory: python/rivet
+        run: |
+          cargo build -p rivet-python-ext
+          mkdir -p build && cp target/debug/lib_rivet.so build/_rivet.so
+          cd tests && python -m unittest discover -v
+      - name: Build the CLI
+        run: cargo build -p rivet-hdl-cli
+      - name: Every example on Icarus, through the plugin
+        run: |
+          set -eu
+          for e in counter alu fifo uart; do
+            echo "::group::$e"
+            target/debug/rivet run --python --sim icarus -C "python/rivet/examples/$e"
+            echo "::endgroup::"
+          done
+      - name: The examples that measure coverage reach 100%
+        # Also guards the merge step: with one parameter set and no
+        # sharding the coverage file the simulator writes *is* the merged
+        # path, which the CLI used to delete before reading it.
+        run: |
+          set -eu
+          for e in alu fifo; do
+            target/debug/rivet run --python --sim icarus -C "python/rivet/examples/$e" --cov-threshold 100
+          done
+      - name: A failing test is reported as failing
+        run: |
+          cp ci/fixtures/test_python_failure.py python/rivet/examples/counter/
+          set +e
+          target/debug/rivet run --python --sim icarus \
+            -C python/rivet/examples/counter \
+            --python-tests test_python_failure > /tmp/out.txt 2>&1
+          status=$?
+          set -e
+          cat /tmp/out.txt
+          rm python/rivet/examples/counter/test_python_failure.py
+          test "$status" -ne 0 || { echo "a failing test must not exit 0"; exit 1; }
+          grep -q "this assertion is meant to fail" /tmp/out.txt
+          grep -q "test_python_failure.py" /tmp/out.txt
+      - name: Wheel, with the CLI and the plugin in it
+        working-directory: python/rivet
+        run: python3 build-wheel.py --out dist
+      - name: The wheel alone runs a testbench
+        # No checkout on the path, no cargo, no Rust: what a user gets from
+        # `pip install rivet-hdl`.
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install python/rivet/dist/*.whl
+          # Named files, not a glob: an earlier step in this job leaves
+          # sim_build/ and __pycache__/ here, and plain cp fails on those.
+          mkdir -p /tmp/proj
+          cp python/rivet/examples/counter/counter.v \
+             python/rivet/examples/counter/rivet.toml \
+             python/rivet/examples/counter/test_counter.py /tmp/proj/
+          cd /tmp/proj && PATH=/tmp/wheeltest/bin:/usr/bin:/bin rivet run --sim icarus
 
   python-integrations:
     # The Edalize/FuseSoC backend and the rivet_py shim for cocotb.
@@ -201,7 +284,7 @@ jobs:
           pip install maturin fusesoc edalize cocotb
           pip install -e integrations/edalize
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: FuseSoC runs the dff example through the rivet Edalize backend
         env:
           RIVET_BIN: ${{ github.workspace }}/target/debug/rivet
@@ -243,7 +326,7 @@ jobs:
           git clone --depth 1 --branch v5.036 https://github.com/verilator/verilator.git /tmp/verilator
           cd /tmp/verilator && autoconf && ./configure --prefix=/opt/verilator-5.036 && make -j"$(nproc)" && sudo make install
       - name: Build CLI
-        run: cargo build -p rivet-cli
+        run: cargo build -p rivet-hdl-cli
       - name: Examples on Verilator 5.036
         env:
           VERILATOR: /opt/verilator-5.036/bin/verilator

@@ -26,7 +26,7 @@ jobs:
       - name: Install simulators
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator ghdl
       - name: Build
-        run: cargo build --release -p rivet-cli
+        run: cargo build --release -p rivet-hdl-cli
       - name: Run the bus example with a fresh seed each time
         run: |
           set -eu
@@ -68,6 +68,6 @@ jobs:
       - name: Install simulators
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator
       - name: Build
-        run: cargo build --release -p rivet-cli
+        run: cargo build --release -p rivet-hdl-cli
       - name: Median and spread, against the recorded baseline
         run: python3 ci/bench.py --repeat 5 --cycles 100000 --release --baseline docs/bench-baseline.json --tolerance 2.0

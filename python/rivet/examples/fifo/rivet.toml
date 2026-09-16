@@ -1,0 +1,9 @@
+[design]
+top = "fifo"
+sources = ["fifo.v"]
+
+[python]
+tests = ["test_fifo"]
+
+[sim.icarus]
+args = ["-g2012"]

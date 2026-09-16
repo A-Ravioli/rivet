@@ -16,5 +16,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
-rivet-core = { path = "../../crates/rivet-core" }
-rivet-kit = { path = "../../crates/rivet-kit" }
+rivet-core = { package = "rivet-hdl-core", path = "../../crates/rivet-core" }
+rivet-kit = { package = "rivet-hdl-kit", path = "../../crates/rivet-kit" }

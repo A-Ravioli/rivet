@@ -34,18 +34,18 @@ categories = ["development-tools::testing", "simulation"]
 keywords = ["hdl", "verilog", "vhdl", "verification", "cocotb"]
 
 [workspace.dependencies]
-rivet-core = { path = "crates/rivet-core", version = "0.1.0" }
-rivet-mock = { path = "crates/rivet-mock", version = "0.1.0" }
-rivet-macros = { path = "crates/rivet-macros", version = "0.1.0" }
-rivet-vpi = { path = "crates/rivet-vpi", version = "0.1.0" }
-rivet-vhpi = { path = "crates/rivet-vhpi", version = "0.1.0" }
-rivet-verilator = { path = "crates/rivet-verilator", version = "0.1.0" }
-rivet-manifest = { path = "crates/rivet-manifest", version = "0.1.0" }
-rivet-kit = { path = "crates/rivet-kit", version = "0.1.0" }
-rivet-cli = { path = "crates/rivet-cli", version = "0.1.0" }
+rivet-core = { package = "rivet-hdl-core", path = "crates/rivet-core", version = "0.1.0" }
+rivet-mock = { package = "rivet-hdl-mock", path = "crates/rivet-mock", version = "0.1.0" }
+rivet-macros = { package = "rivet-hdl-macros", path = "crates/rivet-macros", version = "0.1.0" }
+rivet-vpi = { package = "rivet-hdl-vpi", path = "crates/rivet-vpi", version = "0.1.0" }
+rivet-vhpi = { package = "rivet-hdl-vhpi", path = "crates/rivet-vhpi", version = "0.1.0" }
+rivet-verilator = { package = "rivet-hdl-verilator", path = "crates/rivet-verilator", version = "0.1.0" }
+rivet-manifest = { package = "rivet-hdl-manifest", path = "crates/rivet-manifest", version = "0.1.0" }
+rivet-kit = { package = "rivet-hdl-kit", path = "crates/rivet-kit", version = "0.1.0" }
+rivet-cli = { package = "rivet-hdl-cli", path = "crates/rivet-cli", version = "0.1.0" }
 # No default backend: each test crate picks VPI, VHPI or Verilator,
 # because a library carrying two of them fails to load.
-rivet = { path = "crates/rivet", version = "0.1.0", default-features = false }
+rivet = { package = "rivet-hdl", path = "crates/rivet", version = "0.1.0", default-features = false }
 inventory = "0.3"
 # A small, dependency-free regular expression engine for test filters.
 regex-lite = "0.1"

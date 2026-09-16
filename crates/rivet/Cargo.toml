@@ -1,5 +1,5 @@
 [package]
-name = "rivet"
+name = "rivet-hdl"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,11 @@ rust-version.workspace = true
 categories.workspace = true
 keywords.workspace = true
 readme = "README.md"
+
+# The package is `rivet-hdl` on crates.io; the library keeps its
+# short name, so testbenches say `rivet` as they always have.
+[lib]
+name = "rivet"
 
 [dependencies]
 rivet-core = { workspace = true }

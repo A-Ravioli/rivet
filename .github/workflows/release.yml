@@ -27,7 +27,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Build the CLI
-        run: cargo build --release -p rivet-cli --target ${{ matrix.target }}
+        run: cargo build --release -p rivet-hdl-cli --target ${{ matrix.target }}
       - name: Package
         run: |
           set -eu
@@ -45,6 +45,8 @@ jobs:
             rivet-*.tar.gz.sha256
 
   wheel:
+    # The cocotb-side kit shim. One wheel: it is abi3 and links no
+    # interpreter.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -61,8 +63,69 @@ jobs:
           name: rivet-py-wheel
           path: python/rivet_py/dist/*.whl
 
+  wheels-rivet-hdl:
+    # `rivet-hdl`: the Python testbench API, and the binaries that make
+    # `pip install rivet-hdl` enough on its own — the `rivet` CLI and the
+    # PLI plugin. The plugin embeds CPython, so there is one wheel per
+    # platform *and* per Python minor version. abi3 does not help: it
+    # narrows the API, but pyo3 still links the concrete interpreter.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, macos-13]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install maturin
+      - name: Build the wheel, with the CLI and the plugin in it
+        working-directory: python/rivet
+        run: python3 build-wheel.py --out dist
+      - name: It runs a testbench with nothing else installed
+        # Proves the wheel is self-sufficient: no checkout on the path, no
+        # cargo, no Rust. Only on Linux, where a simulator is cheap to get.
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends iverilog
+          python3 -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install python/rivet/dist/*.whl
+          # Named files, not a glob: an earlier step in this job leaves
+          # sim_build/ and __pycache__/ here, and plain cp fails on those.
+          mkdir -p /tmp/proj
+          cp python/rivet/examples/counter/counter.v \
+             python/rivet/examples/counter/rivet.toml \
+             python/rivet/examples/counter/test_counter.py /tmp/proj/
+          cd /tmp/proj && PATH=/tmp/wheeltest/bin:/usr/bin:/bin rivet run --sim icarus
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rivet-hdl-wheel-${{ matrix.os }}-py${{ matrix.python }}
+          path: python/rivet/dist/*.whl
+
+  publish-pypi:
+    needs: [wheels-rivet-hdl, wheel]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      # Trusted publishing: no long-lived token in the repository.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rivet-hdl-wheel-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
   publish-crates:
-    needs: [binaries, wheel]
+    needs: [binaries, wheel, wheels-rivet-hdl]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
@@ -73,7 +136,11 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -eu
-          for c in rivet-core rivet-macros rivet-manifest rivet-kit rivet-vpi rivet-verilator rivet-mock rivet rivet-cli; do
+          # Dependency order. rivet-hdl-vhpi was missing from this list
+          # before, so NVC users had no published backend.
+          for c in rivet-hdl-core rivet-hdl-macros rivet-hdl-manifest rivet-hdl-kit \
+                   rivet-hdl-vpi rivet-hdl-vhpi rivet-hdl-verilator rivet-hdl-mock \
+                   rivet-hdl rivet-hdl-cli; do
             echo "::group::$c"
             cargo publish -p "$c" --no-verify
             # crates.io needs a moment before a dependant can resolve the new version
@@ -82,7 +149,7 @@ jobs:
           done
 
   release:
-    needs: [binaries, wheel]
+    needs: [binaries, wheel, wheels-rivet-hdl]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:

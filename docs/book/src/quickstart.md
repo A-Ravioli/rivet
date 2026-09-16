@@ -22,7 +22,7 @@ iverilog -V | head -1
 ```sh
 git clone https://github.com/A-Ravioli/rivet
 cd rivet
-cargo build -p rivet-cli
+cargo build -p rivet-hdl-cli
 ```
 
 That writes `target/debug/rivet`. Put it on your `PATH`, or use the full

@@ -6,6 +6,12 @@ concurrent tasks, one results file per run. What changes is the language
 and what the harness does for you. This page maps the cocotb API onto
 Rivet and lists the things that have no direct equivalent.
 
+> This page maps cocotb onto Rivet's **Rust** API. If you would rather
+> keep writing Python, Rivet takes that too — the same harness, the same
+> kit, the same `results.xml`, with its own translation table:
+> [`python.md`](python.md#coming-from-cocotb).
+
+
 ## Test setup
 
 | cocotb | Rivet |

@@ -135,10 +135,17 @@ pub fn all_tests() -> Vec<&'static TestDesc> {
 /// expression falls back to a substring match, so plain names keep working.
 /// An empty or absent filter selects everything.
 pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
+    selected_parts(t.module, t.name, t.param_sets, filter)
+}
+
+/// [`selected`], for a test described by its parts rather than by a
+/// `'static` [`TestDesc`]. Tests discovered at run time (the Python
+/// bridge) go through the same selection rule as `#[rivet::test]` ones.
+pub fn selected_parts(module: &str, name: &str, param_sets: &[&str], filter: Option<&str>) -> bool {
     // A test tied to parameter sets runs only under one of them.
-    if !t.param_sets.is_empty() {
+    if !param_sets.is_empty() {
         match param_set() {
-            Some(set) if t.param_sets.contains(&set.as_str()) => {}
+            Some(set) if param_sets.contains(&set.as_str()) => {}
             _ => return false,
         }
     }
@@ -146,17 +153,17 @@ pub fn selected(t: &TestDesc, filter: Option<&str>) -> bool {
     // share of the tests.
     if let Ok(sel) = std::env::var("RIVET_TEST_SELECT") {
         if !sel.trim().is_empty() {
-            let full = format!("{}::{}", t.module, t.name);
+            let full = format!("{module}::{name}");
             return sel.split(',').map(str::trim).any(|s| s == full);
         }
     }
     match filter {
         Some(f) if !f.trim().is_empty() => {
-            let full = format!("{}::{}", t.module, t.name);
+            let full = format!("{module}::{name}");
             f.split(',')
                 .map(str::trim)
                 .filter(|p| !p.is_empty())
-                .any(|pat| pattern_matches(pat, &full) || pattern_matches(pat, t.name))
+                .any(|pat| pattern_matches(pat, &full) || pattern_matches(pat, name))
         }
         _ => true,
     }
@@ -207,11 +214,91 @@ pub async fn run_regression(root: Module) -> Vec<TestResult> {
     run_regression_with(root, all_tests(), filter.as_deref()).await
 }
 
+/// A test described at run time rather than by `#[rivet::test]`.
+///
+/// `#[rivet::test]` submits a `'static` [`TestDesc`] through `inventory`,
+/// whose body is a plain `fn` pointer. A bridge that discovers its tests
+/// while the process runs — the Python one — cannot do that, because its
+/// bodies are values, not functions. Both shapes convert to a `TestSpec`
+/// and are run by [`run_regression_specs`], so a Python test gets the same
+/// seeding, timeouts, per-test waves, `expect_fail` handling and
+/// `results.xml` entry as a Rust one, from the same code.
+pub struct TestSpec {
+    pub name: String,
+    pub module: String,
+    pub run: Box<dyn Fn(Module) -> TestFuture>,
+    /// Evaluated when the test starts, under a panic guard.
+    pub timeout: Box<dyn Fn() -> Option<Duration>>,
+    pub skip: bool,
+    pub expect_fail: bool,
+    pub expect_fail_msg: Option<String>,
+    pub expect_timeout: bool,
+    pub file: String,
+    pub line: u32,
+    pub stage: i32,
+    pub wall_timeout: Option<f64>,
+    pub param_sets: Vec<String>,
+}
+
+impl TestSpec {
+    /// A spec with everything but the body left at its default.
+    pub fn new(module: &str, name: &str, run: impl Fn(Module) -> TestFuture + 'static) -> TestSpec {
+        TestSpec {
+            name: name.to_string(),
+            module: module.to_string(),
+            run: Box::new(run),
+            timeout: Box::new(|| None),
+            skip: false,
+            expect_fail: false,
+            expect_fail_msg: None,
+            expect_timeout: false,
+            file: String::new(),
+            line: 0,
+            stage: 0,
+            wall_timeout: None,
+            param_sets: Vec::new(),
+        }
+    }
+
+    pub fn from_desc(t: &'static TestDesc) -> TestSpec {
+        TestSpec {
+            name: t.name.to_string(),
+            module: t.module.to_string(),
+            run: Box::new(t.run),
+            timeout: Box::new(t.timeout),
+            skip: t.skip,
+            expect_fail: t.expect_fail,
+            expect_fail_msg: t.expect_fail_msg.map(str::to_string),
+            expect_timeout: t.expect_timeout,
+            file: t.file.to_string(),
+            line: t.line,
+            stage: t.stage,
+            wall_timeout: t.wall_timeout,
+            param_sets: t.param_sets.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    pub fn full_name(&self) -> String {
+        format!("{}::{}", self.module, self.name)
+    }
+
+    /// Whether this test runs under `filter`; see [`selected`].
+    pub fn is_selected(&self, filter: Option<&str>) -> bool {
+        let sets: Vec<&str> = self.param_sets.iter().map(String::as_str).collect();
+        selected_parts(&self.module, &self.name, &sets, filter)
+    }
+}
+
 /// Run the given tests in order, with an explicit selection filter.
 pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, filter: Option<&str>) -> Vec<TestResult> {
+    run_regression_specs(root, tests.into_iter().map(TestSpec::from_desc).collect(), filter).await
+}
+
+/// Run the given specs in order, with an explicit selection filter.
+pub async fn run_regression_specs(root: Module, tests: Vec<TestSpec>, filter: Option<&str>) -> Vec<TestResult> {
     let precision = runtime::precision();
     let mut results = Vec::new();
-    let total = tests.iter().filter(|t| selected(t, filter)).count();
+    let total = tests.iter().filter(|t| t.is_selected(filter)).count();
     log::info!(
         "running {} test(s) on {} (seed {})",
         total,
@@ -219,21 +306,21 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
         crate::random::base_seed()
     );
     let mut idx = 0;
-    for t in tests {
-        if !selected(t, filter) {
+    for t in &tests {
+        if !t.is_selected(filter) {
             continue;
         }
         idx += 1;
         if t.skip {
             log::info!("skipping {}::{}", t.module, t.name);
             results.push(TestResult {
-                name: t.name.to_string(),
-                module: t.module.to_string(),
+                name: t.name.clone(),
+                module: t.module.clone(),
                 outcome: Outcome::Skipped,
                 sim_time_steps: 0,
                 wall_secs: 0.0,
                 seed: 0,
-                file: t.file.to_string(),
+                file: t.file.clone(),
                 line: t.line,
             });
             continue;
@@ -243,7 +330,7 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             Timer::steps(1).await;
         }
         let seed = crate::random::begin_test(&format!("{}::{}", t.module, t.name));
-        crate::log::begin_test(t.module, t.name);
+        crate::log::begin_test(&t.module, &t.name);
         log::info!("running {}::{} ({idx}/{total}, seed {seed})", t.module, t.name);
         let wall = Instant::now();
         let start = runtime::now();
@@ -257,13 +344,17 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
         }
         // Evaluate and convert the timeout under a guard: a bad expression
         // must fail this test, not the regression task.
-        let timeout = match std::panic::catch_unwind(|| (t.timeout)().map(|d| (d, d.to_steps(precision)))) {
+        // `AssertUnwindSafe`: the timeout closure is owned by the spec and
+        // nothing observes it after a panic — the test just fails.
+        let timeout = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (t.timeout)().map(|d| (d, d.to_steps(precision)))
+        })) {
             Ok(d) => Ok(d),
             Err(p) => Err(format!("invalid timeout: {}", runtime::panic_message(&p))),
         };
         let outcome = match timeout {
             Ok(timeout) => {
-                let handle = crate::task::spawn_named(t.name, (t.run)(root));
+                let handle = crate::task::spawn_named(&t.name, (t.run)(root));
                 run_one(handle, timeout).await
             }
             Err(msg) => Outcome::Failed(msg),
@@ -282,7 +373,7 @@ pub async fn run_regression_with(root: Module, tests: Vec<&'static TestDesc>, fi
             (o, _) => o,
         };
         let expects_failure = t.expect_fail || t.expect_timeout || t.expect_fail_msg.is_some();
-        let wanted = t.expect_fail_msg.or(if t.expect_timeout { Some("timed out after") } else { None });
+        let wanted = t.expect_fail_msg.as_deref().or(if t.expect_timeout { Some("timed out after") } else { None });
         let outcome = match (expects_failure, outcome) {
             (true, Outcome::Failed(msg)) => match wanted {
                 Some(w) if !msg.contains(w) => {
@@ -673,7 +764,11 @@ pub fn install_default_entry() {
     });
 }
 
-fn finish_with(results: &[TestResult]) {
+/// Summarize a finished regression: print the table, write
+/// `results.xml` and the JSON and coverage files the CLI reads, set the
+/// process exit code and tell the simulator to stop. Shared by the Rust
+/// entry point and by bridges that run their own tests.
+pub fn finish_with(results: &[TestResult]) {
     let failed = summarize(results);
     let sim = runtime::with(|rt| rt.backend.name().to_string());
     let precision = runtime::precision();

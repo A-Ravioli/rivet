@@ -1188,11 +1188,13 @@ pub fn startup_with(wrap: impl FnOnce(VpiBackend) -> Box<dyn Backend>) {
     }
 }
 
+#[cfg(feature = "startup-table")]
 unsafe extern "C" fn rivet_vpi_startup_routine() {
     let _ = catch_unwind(startup);
 }
 
 /// The table simulators scan when loading a VPI module.
+#[cfg(feature = "startup-table")]
 #[no_mangle]
 pub static vlog_startup_routines: [Option<unsafe extern "C" fn()>; 2] = [Some(rivet_vpi_startup_routine), None];
 
@@ -1202,6 +1204,7 @@ pub static vlog_startup_routines: [Option<unsafe extern "C" fn()>; 2] = [Some(ri
 /// # Safety
 /// Must be called from the simulator's thread, once, before any other
 /// Rivet API.
+#[cfg(feature = "startup-table")]
 #[no_mangle]
 pub unsafe extern "C" fn vlog_startup_routines_bootstrap() {
     for r in vlog_startup_routines.iter().flatten() {

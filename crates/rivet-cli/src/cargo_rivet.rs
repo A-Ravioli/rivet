@@ -1,5 +1,5 @@
 //! `cargo rivet ...`: the same command line as `rivet`, invoked through
-//! cargo (`cargo install rivet-cli` puts both on the path).
+//! cargo (`cargo install rivet-hdl-cli` puts both on the path).
 
 fn main() -> std::process::ExitCode {
     let mut args = std::env::args().skip(1).peekable();
